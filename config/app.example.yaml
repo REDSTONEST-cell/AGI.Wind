@@ -1,0 +1,20 @@
+# Model providers are deliberately unconfigured. No fake production readiness.
+providers: {}
+models: {}
+runtime:
+  preferred: letta
+  fallback_policy: explicit_admin_selection
+data_dir: ../data
+embedding_device: cpu
+asr_device: cpu
+proactive_enabled: false
+# Optional local voice replies (Breeze-TTS). Disabled by default: enable it only after the voice
+# service is deployed with scripts/start-voice.ps1 and config/voice.local.json.
+voice:
+  enabled: false
+  base_url: http://127.0.0.1:8137
+  voice_id: yuwan
+  voice_version: "1"
+  probability: 0.3
+  max_chars: 400
+  timeout_seconds: 180

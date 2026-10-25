@@ -1,0 +1,11 @@
+from sqlalchemy import Table, Column, Text, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
+from ..archive.models import metadata, idcol, fk, js, ts
+
+generation_stream_events = Table("generation_stream_events", metadata, idcol(), fk("generation_id", "generations"), Column("sequence", Integer, nullable=False), Column("type", Text, nullable=False), js("payload"), Column("epoch", Integer, nullable=False), ts(), UniqueConstraint("generation_id", "sequence"))
+conversation_live_events = Table("conversation_live_events", metadata, idcol(), fk("conversation_id", "conversations"), Column("sequence", Integer, nullable=False), Column("type", Text, nullable=False), js("payload"), ts(), UniqueConstraint("conversation_id", "sequence"))
+delivery_commands = Table("delivery_commands", metadata, idcol(), fk("generation_id", "generations"), Column("operation", Text, nullable=False), js("result"), ts())
+speech_segments = Table("speech_segments", metadata, idcol(), fk("generation_id", "generations"), Column("epoch", Integer, nullable=False), Column("segment_index", Integer, nullable=False), Column("source_event_id", UUID(as_uuid=True), ForeignKey("events.id")), Column("display_text", Text, nullable=False), Column("spoken_text", Text, nullable=False), Column("voice_id", Text, nullable=False), Column("voice_version", Text, nullable=False), Column("asset_id", UUID(as_uuid=True), ForeignKey("assets.id")), Column("sample_rate", Integer), Column("channels", Integer), Column("duration_ms", Integer), Column("state", Text, nullable=False, default="queued"), Column("error_code", Text), UniqueConstraint("generation_id", "epoch", "segment_index"))
+avatar_cues = Table("avatar_cues", metadata, idcol(), fk("generation_id", "generations"), Column("epoch", Integer, nullable=False), Column("segment_id", UUID(as_uuid=True), ForeignKey("speech_segments.id")), js("cue"))
+playback_receipts = Table("playback_receipts", metadata, fk("segment_id", "speech_segments", primary_key=True), Column("device_id", Text, primary_key=True), fk("generation_id", "generations"), Column("state", Text, nullable=False), Column("played_ms", Integer, nullable=False), ts("received_at"))
+DELIVERY_TABLES = ["generation_stream_events", "conversation_live_events", "delivery_commands", "speech_segments", "avatar_cues", "playback_receipts"]

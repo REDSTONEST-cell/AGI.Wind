@@ -1,0 +1,26 @@
+# Existing research, tools and avatar originals stay outside business source control.
+/tools/
+/research/
+/output/
+/data/
+/config/*.local.*
+/.devtools/
+/.superpowers/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/pytest-of-wind/
+**/.ruff_cache/
+**/node_modules/
+.env
+.env.*
+!.env.example
+*.log
+*.egg-info/
+dist/
+build/
+coverage/
+
+# AOCI agent host integration (machine-bound; do not commit)
+.codex/config.toml
+.codex/config.toml.backup.*

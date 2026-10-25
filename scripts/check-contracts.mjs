@@ -1,0 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+import { resolve } from 'node:path';
+const before = readFileSync('packages/contracts/schema.json', 'utf8');
+execFileSync(resolve(process.platform === 'win32' ? 'app/.venv/Scripts/python.exe' : 'app/.venv/bin/python'), ['scripts/generate-contracts.py']);
+if (before !== readFileSync('packages/contracts/schema.json', 'utf8')) throw new Error('Python schema drift; regenerate and review');
+const { compile } = await import('json-schema-to-typescript');
+const generated = await compile(JSON.parse(before), 'AGIWindProtocol10', { additionalProperties: false, unreachableDefinitions: true });
+if (generated !== readFileSync('packages/contracts/types.ts', 'utf8')) throw new Error('TypeScript contract drift; run pnpm contracts:types');
+console.log('Protocol 1.0: Python schema and generated TypeScript match');

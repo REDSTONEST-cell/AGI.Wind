@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "active_voice_id": "yuwan",
+  "voices": [
+    {
+      "id": "yuwan",
+      "name": "鱼丸",
+      "engine": "breeze-tts-2",
+      "reference": "data/voice/yuwan-reference.wav",
+      "voice_file": "C:/Models/Breeze-TTS-2/voices/yuwan.breeze",
+      "version": "1"
+    }
+  ],
+  "status": "ready"
+}
