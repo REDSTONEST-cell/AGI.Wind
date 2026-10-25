@@ -1,8 +1,8 @@
-import { AgiWindClient, ApiError } from './sdk/api.js?v=20261026c';
-import { appendImages, messageImages } from './media.js?v=20261026c';
-import { cropAvatar } from './avatar-crop.js?v=20261026c';
-import { splitReply } from './reply-segments.js?v=20261026c';
-import { createAudioMessage, stopAllAudio } from './audio.js?v=20261026c';
+import { AgiWindClient, ApiError } from './sdk/api.js?v=20261027a';
+import { appendImages, messageImages } from './media.js?v=20261027a';
+import { cropAvatar } from './avatar-crop.js?v=20261027a';
+import { splitReply } from './reply-segments.js?v=20261027a';
+import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027a';
 import { createAgentPage } from './agent-settings.js';
 
 const client = new AgiWindClient();
@@ -85,6 +85,7 @@ const state = {
   historyLogged: new Set(),
   liveWatch: null,
   seenProactive: new Set(),
+  chatPinned: true,
 };
 
 const LOG_KEY = 'agiwind-log-v1';
@@ -98,7 +99,7 @@ const PAGES = {
   soul: { label: '灵魂档案', load: () => loadPersona().catch(() => {}) },
   memory: { label: '记忆', load: () => loadMemoryPage() },
   stickers: { label: '表情包库', load: () => loadStickers() },
-  model: { label: '模型与密钥', load: () => loadModelPage() },
+  model: { label: '模型与语音', load: () => loadModelPage() },
   agent: { label: 'Agent 能力', load: () => agentPage.load() },
   connection: { label: '连接', load: () => loadConnectionPage() },
   appearance: { label: '外观与账户', load: () => updateAppearancePage() },
@@ -238,7 +239,7 @@ function logHistoryProcessing(event) {
 }
 
 function setLogWidth(value,{persist=false}={}) {
-  const sidebar=window.innerWidth>1180?234:(window.innerWidth>760?210:0);
+  const sidebar=window.innerWidth>1180?248:(window.innerWidth>760?216:0);
   const max=Math.max(280,window.innerWidth-sidebar-(sidebar?320:64));
   state.logWidth=Math.round(Math.max(280,Math.min(max,Number.isFinite(value)?value:420)));
   document.documentElement.style.setProperty('--log-width',state.logWidth+'px');
@@ -673,6 +674,29 @@ function updateAppearancePage() {
   updateThemeCards();
 }
 
+/* ---------- 手机端导航抽屉 ---------- */
+function openNav() {
+  $('#app').classList.add('nav-open');
+  $('#nav-scrim').hidden = false;
+  setTimeout(() => $('#sidebar .nav-item.active')?.focus(), 0);
+}
+
+function closeNav() {
+  if (!$('#app').classList.contains('nav-open')) return;
+  $('#app').classList.remove('nav-open');
+  $('#nav-scrim').hidden = true;
+}
+
+/* 对话头部的在线 / 输入中状态 */
+function updateChatPresence() {
+  const node = $('#chat-presence');
+  if (!node) return;
+  const online = state.lastServiceOnline;
+  const next = state.busy ? 'typing' : online === true ? 'online' : online === false ? 'offline' : 'idle';
+  node.dataset.state = next;
+  node.textContent = { typing: '正在输入…', online: '在线', offline: '服务离线', idle: '连接中' }[next];
+}
+
 function pageFromHash() {
   const name = (location.hash || '').replace(/^#\/?/, '').replace(/\/$/, '');
   return PAGES[name] ? name : 'chat';
@@ -693,6 +717,7 @@ function renderPage(name, { load = true } = {}) {
   $('#breadcrumb-page').textContent = PAGES[name].label;
   document.title = 'AGI.Wind · ' + PAGES[name].label;
   if (name !== 'chat') closeSessionMenu();
+  closeNav();
   if (load) PAGES[name].load();
 }
 
@@ -1116,6 +1141,7 @@ async function refreshService() {
     ? (state.readyStatus === '就绪' ? '就绪' : '部分可用')
     : '离线';
   $('#metric-database').textContent = state.readyDeps.database === 'available' ? '可用' : (online ? '不可用' : '—');
+  updateChatPresence();
   if (state.currentPage === 'connection') fillConnectionForm();
 }
 
@@ -1359,6 +1385,10 @@ function updateChatIdentity() {
   const name = state.personaName || state.companionName || '她';
   $('#empty-title').textContent = name ? '开始和 ' + name + ' 说话' : '开始一段新的对话';
   paintAvatar($('#empty-avatar'), name, state.avatarAssetId);
+  paintAvatar($('#chat-peer-avatar'), name, state.avatarAssetId);
+  paintAvatar($('#nav-avatar'), name, state.avatarAssetId);
+  $('#chat-peer-name').textContent = name;
+  $('#nav-chat-name').textContent = name;
   updateLogAvatar();
   renderCurrentConversation();
   refreshMessageIdentity();
@@ -1847,6 +1877,7 @@ function scrollToEnd(force = false) {
   const near = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
   if (force) box.scrollTo({ top: box.scrollHeight, behavior: 'instant' });
   else if (near) box.scrollTop = box.scrollHeight;
+  if (force || near) state.chatPinned = true;
 }
 
 function clearChat() {
@@ -2402,6 +2433,7 @@ function isStopCommand(text) {
 
 function setBusy(busy) {
   state.busy=busy;
+  updateChatPresence();
   $('#send').disabled = state.uploadingImages || (busy && !isStopCommand($('#input').value));
   $('#chat-images').disabled=busy||state.uploadingImages;
   $('#stop').hidden = !busy;
@@ -3516,6 +3548,18 @@ function bind() {
     item.addEventListener('click', () => navigate(item.dataset.page));
   });
   window.addEventListener('hashchange', () => renderPage(pageFromHash()));
+  $$('[data-nav-open]').forEach((button) => button.addEventListener('click', openNav));
+  $$('[data-nav-close]').forEach((button) => button.addEventListener('click', closeNav));
+  // 图片等媒体异步加载会撑高历史；用户停留在底部时保持贴底。
+  $('#messages').addEventListener('scroll', () => {
+    const box = $('#messages');
+    state.chatPinned = box.scrollHeight - box.scrollTop - box.clientHeight < 140;
+  }, { passive: true });
+  $('#messages').addEventListener('load', (event) => {
+    if (event.target.tagName !== 'IMG' || !state.chatPinned) return;
+    const box = $('#messages');
+    box.scrollTop = box.scrollHeight;
+  }, true);
   window.addEventListener('resize', syncLogScrim);
   const modelChip = $('#model-chip');
   if (modelChip) modelChip.addEventListener('click', () => navigate('model'));
@@ -3579,6 +3623,7 @@ function bind() {
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape') return;
     closeSessionMenu();
+    closeNav();
     if (state.logOpen) closeLog();
     if (!$('#memory-edit').hidden) closeCorrection();
     if (!$('#modal').hidden) finishModal(null);

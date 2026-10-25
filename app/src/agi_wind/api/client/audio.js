@@ -13,6 +13,16 @@ function node(tag, className, text) {
   return element;
 }
 
+// SVG glyphs avoid the play triangle being rendered as a colour emoji on some platforms.
+const GLYPHS = {
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px;margin-left:2px;fill:currentColor;stroke:none"><path d="M7 4.8v14.4a1 1 0 0 0 1.5.86l12-7.2a1 1 0 0 0 0-1.72l-12-7.2A1 1 0 0 0 7 4.8z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px;fill:currentColor;stroke:none"><rect x="6" y="4.5" width="4" height="15" rx="1.2"/><rect x="14" y="4.5" width="4" height="15" rx="1.2"/></svg>',
+};
+
+function setGlyph(button, name) {
+  button.innerHTML = GLYPHS[name];
+}
+
 function formatDuration(seconds) {
   const value = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
   const minutes = Math.floor(value / 60);
@@ -47,7 +57,7 @@ export function createAudioMessage(client, message, options = {}) {
   const play = node('button', 'audio-play');
   play.type = 'button';
   play.setAttribute('aria-label', '播放语音');
-  play.textContent = '▶';
+  setGlyph(play, 'play');
   const wave = node('div', 'audio-wave');
   wave.setAttribute('aria-hidden', 'true');
   const bars = WAVE_HEIGHTS.map((height, index) => {
@@ -152,17 +162,17 @@ export function createAudioMessage(client, message, options = {}) {
           duration.textContent = formatDuration(total || expected);
         });
         audio.addEventListener('play', () => {
-          play.textContent = '❚❚';
+          setGlyph(play, 'pause');
           play.setAttribute('aria-label', '暂停语音');
           setStatus('', 'ready');
         });
         audio.addEventListener('pause', () => {
-          play.textContent = '▶';
+          setGlyph(play, 'play');
           play.setAttribute('aria-label', '播放语音');
           if (audio && !audio.ended && activePlayer === controller) setStatus('', 'ready');
         });
         audio.addEventListener('ended', () => {
-          play.textContent = '▶';
+          setGlyph(play, 'play');
           play.setAttribute('aria-label', '播放语音');
           duration.textContent = formatDuration(expected || 0);
           setProgress(0);
@@ -185,7 +195,7 @@ export function createAudioMessage(client, message, options = {}) {
 
     release();
     play.disabled = true;
-    play.textContent = '▶';
+    setGlyph(play, 'play');
     play.setAttribute('aria-label', '播放语音');
     duration.textContent = '--:--';
     setProgress(0);
