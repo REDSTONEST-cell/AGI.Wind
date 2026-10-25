@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import json
 import logging
+import random
 from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from ..archive import models as m
@@ -52,7 +54,7 @@ class GenerationService:
         self.voice = voice
         self.provider_resolver=provider_resolver
         self.context_budget,self.input_budget=context_budget,input_budget
-        self.random_value=random_value or __import__('random').random
+        self.random_value=random_value or random.random
         self.reflection_timeout=reflection_timeout
         # Set by the gateway: extraction is a separate outbox job so the chat turn never waits.
         self.memory_extraction_enabled=True
@@ -116,7 +118,7 @@ class GenerationService:
     async def run(self, generation_id):
         with self.db.engine.connect() as conn:
             generation, request, scope = generation_scope(conn, generation_id)
-        key = int.from_bytes(__import__('hashlib').sha256(("run:" + str(scope.companion_id)).encode()).digest()[:8], "big", signed=True)
+        key = int.from_bytes(hashlib.sha256(("run:" + str(scope.companion_id)).encode()).digest()[:8], "big", signed=True)
         with self.db.engine.connect() as lease:
             acquired = lease.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key":key})
             lease.commit()

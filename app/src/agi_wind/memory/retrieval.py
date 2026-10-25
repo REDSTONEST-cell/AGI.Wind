@@ -1,3 +1,4 @@
+import hashlib
 from uuid import UUID
 from datetime import timedelta
 from sqlalchemy import select, or_, and_, func, literal_column, exists, update
@@ -84,7 +85,7 @@ class MemoryService:
             historical=set(conn.scalars(select(mm.source_refs.c.event_id).join(mm.memory_items).where(mm.memory_items.c.companion_id==scope.companion_id,mm.memory_items.c.account_id==scope.account_id,mm.memory_items.c.status!="active")))
             for key in sorted(scores, key=scores.get, reverse=True):
                 row = records[key]
-                hits.append(MemoryHit(chunk_id=row["id"], content=row["content"], score=scores[key], epistemic_type="assistant_generated" if row["role"] == "assistant" else "user_asserted", source_refs=[SourceRef(event_id=row["source_id"], start_offset=row["start_offset"], end_offset=row["end_offset"], quote_hash=__import__('hashlib').sha256(row["content"].encode()).hexdigest())], time_range=(row["occurred_at"], row["occurred_at"]),status="historical" if row["source_id"] in historical else "active"))
+                hits.append(MemoryHit(chunk_id=row["id"], content=row["content"], score=scores[key], epistemic_type="assistant_generated" if row["role"] == "assistant" else "user_asserted", source_refs=[SourceRef(event_id=row["source_id"], start_offset=row["start_offset"], end_offset=row["end_offset"], quote_hash=hashlib.sha256(row["content"].encode()).hexdigest())], time_range=(row["occurred_at"], row["occurred_at"]),status="historical" if row["source_id"] in historical else "active"))
             hits.sort(key=lambda hit: hit.score, reverse=True)
             return hits
 

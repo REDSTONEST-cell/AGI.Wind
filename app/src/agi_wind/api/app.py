@@ -16,8 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse,StreamingResponse,FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine,select,text,func
-from pydantic import Field,ValidationError
-from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings,ProactiveSettings
+from pydantic import Field,ValidationError,SecretStr
+from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings,ProactiveSettings,SETTINGS_WRITE_LOCK
 from ..core.secrets import SecretStore,credential_ref_for
 from ..core.types import DTO,Actor,ChatRequest,ModelRef,Scope
 from ..core.errors import AppError
@@ -252,7 +252,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             while not closing.is_set():
                 if settings.memory_maintenance_enabled:
                     try:
-                        maintain_memories(db)
+                        await asyncio.to_thread(maintain_memories,db)
                     except Exception:
                         logger.warning("memory lifecycle maintenance failed",exc_info=True)
                     timeout=settings.memory_maintenance_hours*3600
@@ -363,7 +363,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     async def contain_internal_errors(request,call_next):
         try: return await call_next(request)
         except Exception:
-            # Do not let the server print upstream/DB exception details containing private rows.
+            # Do not let the server print upstream/DB exception details containing private rows,
+            # but keep the stack trace in the gateway console for diagnosis.
+            logger.exception("unhandled error on %s %s",request.method,request.url.path)
             return JSONResponse({"error":{"code":"INTERNAL_ERROR","message":"请求未完成，请检查服务状态","retryable":False}},status_code=500)
 
     @app.middleware("http")
@@ -421,14 +423,23 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         client=getattr(request,"client",None)
         ip=client.host if client else "unknown"
         now=time.monotonic()
-        attempts=key_attempts[ip]
+        attempts=key_attempts.get(ip)
+        if attempts is None:
+            attempts=deque()
+            key_attempts[ip]=attempts
         while attempts and now-attempts[0]>60: attempts.popleft()
+        if not attempts:
+            # Do not leak idle IP keys after their 60s window has expired.
+            if key_attempts.get(ip) is attempts: key_attempts.pop(ip,None)
+            attempts=deque()
         if len(attempts)>=5: raise AppError("RATE_LIMITED","尝试次数过多，请一分钟后再试",429)
         expected=settings.client_key.get_secret_value() if settings.client_key else ""
         if not expected or not secrets.compare_digest(body.key,expected):
             attempts.append(now)
+            key_attempts[ip]=attempts
             raise AppError("UNAUTHENTICATED","客户端密钥不正确",401)
         attempts.clear()
+        key_attempts.pop(ip,None)
         session_id,csrf=sessions.create()
         logger.info("client key session created from %s",ip)
         return session_cookie_response(request,session_id,csrf)
@@ -498,10 +509,11 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         if body.model_id:
             model=ModelRef(provider_id=provider_id,model_id=body.model_id,parameters=body.model_parameters)
             if set(model.parameters)-set(config.supported_parameters): raise AppError("UNSUPPORTED_PARAMETER","厂商不支持指定参数",422)
-        settings.providers[provider_id]=config
-        if model is not None: setattr(settings.models,body.role or "dialogue",model)
-        logger.info("provider %s saved",provider_id)
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            settings.providers[provider_id]=config
+            if model is not None: setattr(settings.models,body.role or "dialogue",model)
+            logger.info("provider %s saved",provider_id)
+            persist_settings(settings)
         refresh_runtime()
         return provider_view(provider_id)
 
@@ -509,11 +521,12 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     def delete_provider(provider_id:str,current=Depends(authenticate)):
         config=settings.providers.pop(provider_id,None)
         if config is None: raise AppError("NOT_FOUND","服务商不存在",404)
-        store.delete(config.credential_ref)
-        for role in type(settings.models).model_fields:
-            reference=getattr(settings.models,role)
-            if reference is not None and reference.provider_id==provider_id: setattr(settings.models,role,None)
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            store.delete(config.credential_ref)
+            for role in type(settings.models).model_fields:
+                reference=getattr(settings.models,role)
+                if reference is not None and reference.provider_id==provider_id: setattr(settings.models,role,None)
+            persist_settings(settings)
         refresh_runtime()
         logger.info("provider %s deleted",provider_id)
         return {"deleted":provider_id}
@@ -523,8 +536,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         config=settings.providers.get(body.provider_id)
         if config is None and body.provider_id!="local": raise AppError("UNKNOWN_PROVIDER","请先配置服务商",422)
         if config is not None and set(body.parameters)-set(config.supported_parameters): raise AppError("UNSUPPORTED_PARAMETER","厂商不支持指定参数",422)
-        setattr(settings.models,role,ModelRef(provider_id=body.provider_id,model_id=body.model_id,parameters=body.parameters))
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            setattr(settings.models,role,ModelRef(provider_id=body.provider_id,model_id=body.model_id,parameters=body.parameters))
+            persist_settings(settings)
         refresh_runtime()
         logger.info("model role %s -> %s/%s",role,body.provider_id,body.model_id)
         return {role:getattr(settings.models,role).model_dump(mode="json")}
@@ -539,6 +553,13 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         try:
             async with httpx.AsyncClient(timeout=min(config.timeout_seconds,8.0)) as probe:
                 response=await probe.get(config.base_url.rstrip("/")+"/models",headers={"Authorization":"Bearer "+credential})
+                if response.status_code>=400:
+                    fallback_model=next((getattr(settings.models,role).model_id for role in type(settings.models).model_fields if getattr(settings.models,role) is not None and getattr(settings.models,role).provider_id==provider_id),None)
+                    if fallback_model:
+                        chat=await probe.post(config.base_url.rstrip("/")+"/chat/completions",headers={"Authorization":"Bearer "+credential},json={"model":fallback_model,"messages":[{"role":"user","content":"ping"}],"max_tokens":1,"stream":False})
+                        if chat.status_code<400:
+                            return {"ok":True,"status":chat.status_code,"message":"端点可访问（/models 不可用，chat 探测通过）"}
+                        return {"ok":False,"status":chat.status_code,"message":"厂商返回错误状态"}
             return {"ok":response.status_code<400,"status":response.status_code,"message":"端点可访问" if response.status_code<400 else "厂商返回错误状态"}
         except httpx.HTTPError:
             return {"ok":False,"status":0,"message":"无法连接厂商端点"}
@@ -767,13 +788,14 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     @app.patch("/api/v1/memory/settings")
     def update_memory_settings(body:MemorySettingsPatch,current=Depends(authenticate)):
         if body.extraction_enabled is not None: settings.memory_extraction_enabled=body.extraction_enabled
-        if body.batch_events is not None: settings.memory_extract_batch_events=body.batch_events
-        if body.max_candidates is not None: settings.memory_extract_max_candidates=body.max_candidates
-        if body.timeout_seconds is not None: settings.memory_extract_timeout_seconds=body.timeout_seconds
-        if body.maintenance_enabled is not None: settings.memory_maintenance_enabled=body.maintenance_enabled
-        if body.maintenance_hours is not None: settings.memory_maintenance_hours=body.maintenance_hours
-        service.memory_extraction_enabled=settings.memory_extraction_enabled
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            if body.batch_events is not None: settings.memory_extract_batch_events=body.batch_events
+            if body.max_candidates is not None: settings.memory_extract_max_candidates=body.max_candidates
+            if body.timeout_seconds is not None: settings.memory_extract_timeout_seconds=body.timeout_seconds
+            if body.maintenance_enabled is not None: settings.memory_maintenance_enabled=body.maintenance_enabled
+            if body.maintenance_hours is not None: settings.memory_maintenance_hours=body.maintenance_hours
+            service.memory_extraction_enabled=settings.memory_extraction_enabled
+            persist_settings(settings)
         refresh_runtime()
         return memory_settings_view()
 
@@ -834,8 +856,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             except Exception: rows=[]
             if rows and updated.voice_id not in {row["id"] for row in rows}:
                 raise AppError("VOICE_NOT_FOUND","本地没有找到这个音色",422)
-        settings.voice=updated
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            settings.voice=updated
+            persist_settings(settings)
         voice.invalidate()
         logger.info("voice settings updated enabled=%s voice=%s probability=%.2f",updated.enabled,updated.voice_id,updated.probability)
         return await voice_settings_view()
@@ -867,8 +890,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         data.update(body.model_dump(exclude_unset=True,exclude_none=True))
         try: updated=ProactiveSettings.model_validate(data)
         except ValidationError: raise AppError("INVALID_PROACTIVE_SETTINGS","主动消息设置无效",422) from None
-        settings.proactive=updated
-        persist_settings(settings)
+        with SETTINGS_WRITE_LOCK:
+            settings.proactive=updated
+            persist_settings(settings)
         logger.info("proactive settings updated enabled=%s idle=%s gap=%s max=%s",updated.enabled,updated.min_idle_minutes,updated.min_gap_minutes,updated.max_per_day)
         return proactive_view(current)
 
@@ -908,7 +932,7 @@ def from_env():
     if not local.is_file(): raise RuntimeError("Run agi-wind init-local first")
     saved=json.loads(local.read_text(encoding="utf-8"))
     if settings.access_token is None:
-        settings.access_token=__import__('pydantic').SecretStr((settings.data_dir/"access-token.txt").read_text(encoding="utf-8").strip())
+        settings.access_token=SecretStr((settings.data_dir/"access-token.txt").read_text(encoding="utf-8").strip())
     actor=Actor.model_validate(saved["actor"])
     engine=create_engine(settings.database_url.get_secret_value(),hide_parameters=True)
     db=Database(engine)
