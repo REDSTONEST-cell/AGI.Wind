@@ -1,1 +1,44 @@
 #AOCI-CODE-VOLUME: 1
+
+===C:/Users/wind/Desktop/AGI.Wind/===
+.gitattributes[FV5T]: F:约束文本检出换行为LF以稳定AOCI原始字节指纹 | R:- | A:- | S:覆盖本机autocrlf转换；二进制自动识别且不改写
+.gitignore[FC7T]: F:划分业务源码与私密运行数据、原有工具及本机接入配置的提交边界 | R:code:.gitattributes | A:- | S:data、局部配置、虚拟环境、模型工具与输出资产均排除；AOCI主资产仍可治理
+AGENTS.md[SC8S]: F:规定本仓AOCI认知建立、连续交付、语义作者化与最终维护规则 | R:- | A:- | S:Memory不能替代当前认知收据；正式语义必须由Host依绑定证据创作，不能模板推导
+AI伴侣框架选型评估报告.md[SA5L]: F:比较陪伴前端、记忆、语音与部署路线并论证独立原始档案核心 | R:code:Codex开发交接.md | A:- | S:属于2026-10-24调研快照；厂商能力、许可和性能推断不代表本项目已部署
+Codex开发交接.md[SW7T]: F:连接已确定需求、设计计划、资产保留和分阶段验收的开发交接入口 | R:code:README.md | A:- | S:Letta不是唯一档案来源；Live2D预览不等于聊天客户端；缺依赖应记录待条件
+README.md[SO5T]: F:说明本地基础服务入口、启停脚本与当前功能完成边界 | R:code:app/src/agi_wind/api/home.html | A:- | S:主页可打开但只是状态页；模型未配置时ready返回503并不代表进程未运行
+
+===C:/Users/wind/Desktop/AGI.Wind/app/===
+.python-version[FV4T]: F:为uv固定业务Python解释器版本3.12.14 | R:code:app/pyproject.toml | A:- | S:-
+alembic.ini[FD6T]: F:配置Alembic迁移目录与Python路径解释方式 | R:code:app/migrations/env.py | A:- | S:数据库凭据不在本文件，独立迁移需AGI_DATABASE_URL或显式注入连接
+pyproject.toml[FV7T]: F:锁定业务与测试依赖、CLI入口和Python打包边界 | R:code:app/.python-version | A:agi-wind | S:仅支持Python3.12；live和gpu只是pytest标记声明，不会自动证明或排除实测
+
+===C:/Users/wind/Desktop/AGI.Wind/app/migrations/===
+env.py[PD8T]: F:在当前PostgreSQL schema运行Alembic事务并连接共享模型元数据 | R:code:app/alembic.ini,code:app/src/agi_wind/archive/models.py | A:migrate | S:优先使用注入连接；版本表绑定current_schema以隔离真实测试库的临时schema
+
+===C:/Users/wind/Desktop/AGI.Wind/app/migrations/versions/===
+0001_archive.py[PD8T]: F:建立或回滚账号、原始事件、请求、生成和outbox基础表 | R:code:app/src/agi_wind/archive/models.py,code:app/migrations/env.py | A:upgrade,downgrade | S:建表使用导入时捕获的ARCHIVE_TABLES；修改现有模型可能改变新库安装DDL
+0002_identity.py[PI7T]: F:在基础档案迁移之后创建人格、关系、承诺与运行时绑定表 | R:code:app/migrations/versions/0001_archive.py,code:app/src/agi_wind/archive/models.py | A:upgrade,downgrade | S:表定义来自运行时模型模块，迁移文件本身并非冻结DDL快照
+0003_memory.py[PD7T]: F:安装记忆实体、来源、切片与提炼隔离表及中文关键词GIN索引 | R:code:app/migrations/versions/0002_identity.py,code:app/src/agi_wind/archive/models.py | A:upgrade,downgrade | S:索引采用预分词文本的simple配置；没有在此安装pgvector或真实向量模型
+0004_delivery.py[PM7T]: F:建立生成重放、会话控制、语音片段、头像指令及播放回执表 | R:code:app/migrations/versions/0003_memory.py,code:app/src/agi_wind/archive/models.py | A:upgrade,downgrade | S:永久语音和回执表与短期SSE表分离；存在表不代表语音播放链路已接入
+0005_deletions.py[PS8T]: F:添加数据库内无内容的删除墓碑投影表 | R:code:app/src/agi_wind/archive/deletions.py,code:app/migrations/versions/0004_delivery.py | A:upgrade,downgrade | S:此表不能代替独立fsync删除账本，恢复数据库不能覆盖账本
+0006_restore_origins.py[PR8T]: F:添加克隆实体与原始身份之间的来源映射表 | R:code:app/src/agi_wind/archive/provenance.py,code:app/migrations/versions/0005_deletions.py | A:upgrade,downgrade | S:来源映射用于导入前应用旧身份墓碑，不随克隆抹去原始对象身份
+
+===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/===
+__init__.py[CG3T]: F:声明AGI.Wind业务包及版本0.1.0 | R:code:app/pyproject.toml | A:__version__ | S:-
+
+===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/api/===
+app.py[EN9M]: F:装配带认证的原生HTTP、SSE、档案操作和生成worker生命周期 | R:code:app/src/agi_wind/api/auth.py,code:app/src/agi_wind/archive/service.py,code:app/src/agi_wind/archive/deletions.py | A:create_app,from_env | S:启动先重放删除账本；旧运行生成标interrupted不重付费；首页仅状态页且未配模型ready为503
+auth.py[MS8T]: F:将有效Bearer凭据绑定到服务端固定Actor | R:code:app/src/agi_wind/api/app.py | A:bearer_auth | S:未配置或错误凭据一律401；当前没有浏览器cookie会话或匿名自动登录
+home.html[EU6T]: F:展示本地服务依赖状态并手动刷新健康检查结果 | R:code:app/src/agi_wind/api/app.py | A:refresh | S:503仍解析为有效状态报告；不读取密钥、不提供聊天或Live2D客户端功能
+
+===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/archive/===
+assets.py[PD8T]: F:校验图片和WAV上传、内容寻址去重及授权读取媒体 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/archive/repository.py | A:AssetStore.put,AssetStore.get,AssetStore.inspect | S:全局哈希去重仍需独立账号owner；文件fsync与原子改名先于数据库就绪提交
+backup.py[AR7T]: F:编排关键词索引重建和可校验开放包备份 | R:code:app/src/agi_wind/archive/exports.py,code:app/src/agi_wind/archive/imports.py,code:app/src/agi_wind/archive/repository.py | A:IndexService.rebuild_keywords,BackupService.create | S:重建只针对关键词切片；该备份复用开放包而非原生pg_dump或异盘灾备
+deletions.py[PS9S]: F:持久化独立删除意图、清理档案派生数据并回收未共享媒体 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/archive/repository.py | A:DeletionLedger,DeletionService.delete_event,DeletionService.replay | S:账本先fsync后DB提交且不存原文；缺账本拒绝启动；外部副本只报告待物理清理，非已清除
+exports.py[PR9S]: F:冻结角色写入切点并打包权威记录、媒体与逐文件哈希清单 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/archive/deletions.py,code:app/src/agi_wind/archive/provenance.py | A:ExportService.export,ExportService.snapshot,ARCHIVE_TABLE_ORDER | S:复制媒体期间保持角色锁；资产集合取该账号全部owned媒体；未结束任务导出为interrupted且旧播放停止
+imports.py[PR9S]: F:验证归档结构哈希并按新命名空间或克隆恢复基础档案 | R:code:app/src/agi_wind/archive/exports.py,code:app/src/agi_wind/archive/deletions.py,code:app/src/agi_wind/archive/provenance.py | A:ImportService.validate,ImportService.restore,ImportService.sanitize | S:先应用原身份墓碑再克隆；缺最新账本文件则隔离角色；拒绝路径越界、媒体冲突及replace覆盖
+models.py[PD9T]: F:定义PostgreSQL权威档案表、共享MetaData和列构造约定 | R:code:app/src/agi_wind/archive/service.py,code:app/migrations/versions/0001_archive.py | A:metadata,ARCHIVE_TABLES,idcol,fk,js,ts | S:requests.generation_id不是外键；generations.request_id与outbox.dedupe_key各自唯一；所有后续领域共用此MetaData
+provenance.py[PR8T]: F:保存克隆后实体ID到原实体ID的持久映射以追溯恢复来源 | R:code:app/src/agi_wind/archive/imports.py,code:app/src/agi_wind/archive/models.py | A:archive_origins | S:按entity_table和target_id唯一；origin_id不随后续克隆重映射
+repository.py[PD8T]: F:提供数据库访问、规范内容哈希、事务咨询锁及会话归属校验 | R:code:app/src/agi_wind/archive/models.py | A:Database,authorized_conversation,digest,lock | S:seed只创建明确开发身份与初始人格；会话校验同时约束account_id和user_id；锁键参数化
+service.py[AD9T]: F:事务接收用户输入、固定生成任务并追加实际输出档案 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/archive/repository.py | A:ArchiveService.accept,ArchiveService.append_output | S:同request_id同输入复用任务，异输入409；原文、生成、outbox及accepted一起提交；输出可与SSE共用连接落盘

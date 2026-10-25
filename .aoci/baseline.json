@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-25T01:44:09Z",
-  "updated_at": "2026-10-25T01:44:09Z",
+  "updated_at": "2026-10-25T02:12:27Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -11,9 +11,9 @@
     },
     ".gitignore": {
       "role": "index",
-      "sha256": "0fc5dad6d2bac8cd5374267a4b4015d8c6c1b36f2ff0c5caa7cc1c82c8f68c77",
-      "size": 419,
-      "normalized_sha256": "0fc5dad6d2bac8cd5374267a4b4015d8c6c1b36f2ff0c5caa7cc1c82c8f68c77"
+      "sha256": "35928d0eb121542bf57a00d981cc6262969b2fb7fb0bec0af695db7b76a7553b",
+      "size": 438,
+      "normalized_sha256": "35928d0eb121542bf57a00d981cc6262969b2fb7fb0bec0af695db7b76a7553b"
     },
     "AGENTS.md": {
       "role": "index",
@@ -35,15 +35,15 @@
     },
     "README.md": {
       "role": "index",
-      "sha256": "9b725028e78f3efe081a82f3c76ff9caa10ef81ed4f47a141d66728c6ae6fbef",
-      "size": 953,
-      "normalized_sha256": "107b9c07e38af8b35cb2bf22e7f24bd68ea439e4d1522152ab80d433d00924f8"
+      "sha256": "ef9fe862057aa4f834ac24308ad464ab2a42af5600485d73bd4ff8e12515652d",
+      "size": 1044,
+      "normalized_sha256": "50d3fcbc9afed72d5c44f053c3ea667bb5ffe6e32623dd07311cf91aa7fa1841"
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2",
-      "size": 21,
-      "normalized_sha256": "12cbc237b863041b3ab7b6c6330091964cb014a20e624ec1f88de6056aed56c2"
+      "sha256": "925b5d6dbc31a1695b29335d88181b298dc9cb30681917f255c79defd447895e",
+      "size": 8555,
+      "normalized_sha256": "925b5d6dbc31a1695b29335d88181b298dc9cb30681917f255c79defd447895e"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -429,15 +429,21 @@
     },
     "app/src/agi_wind/api/app.py": {
       "role": "index",
-      "sha256": "d85306ff568c60fe34d63dd8b207f09a1dbc12ed86e4e188c461e8d708c31a66",
-      "size": 16838,
-      "normalized_sha256": "d85306ff568c60fe34d63dd8b207f09a1dbc12ed86e4e188c461e8d708c31a66"
+      "sha256": "7023fe0d3c18c48286d2606b3fe51d3831ee10d2f415e9e950d140648b193db5",
+      "size": 17082,
+      "normalized_sha256": "7023fe0d3c18c48286d2606b3fe51d3831ee10d2f415e9e950d140648b193db5"
     },
     "app/src/agi_wind/api/auth.py": {
       "role": "index",
       "sha256": "83dba81de911c19ebfd4d5c8237b37a355da23614b6dd3377d3e3e73d14ad991",
       "size": 556,
       "normalized_sha256": "83dba81de911c19ebfd4d5c8237b37a355da23614b6dd3377d3e3e73d14ad991"
+    },
+    "app/src/agi_wind/api/home.html": {
+      "role": "index",
+      "sha256": "33d38e93a8a5647169d4f7ba6ffa8f909745bb3028e8516e81ad43f446a248e9",
+      "size": 6862,
+      "normalized_sha256": "33d38e93a8a5647169d4f7ba6ffa8f909745bb3028e8516e81ad43f446a248e9"
     },
     "app/src/agi_wind/archive/assets.py": {
       "role": "index",
@@ -669,9 +675,9 @@
     },
     "app/tests/integration/test_api.py": {
       "role": "observe",
-      "sha256": "4818a48ac26a127812546e0d597ee15561f524fb4fb1ea0b8a6f97dec62935b4",
-      "size": 2335,
-      "normalized_sha256": "4818a48ac26a127812546e0d597ee15561f524fb4fb1ea0b8a6f97dec62935b4"
+      "sha256": "30cbc15e2ac3097363118b10a54f7e8c5aba4fda6b525f4b3806b5f4991ae881",
+      "size": 3204,
+      "normalized_sha256": "30cbc15e2ac3097363118b10a54f7e8c5aba4fda6b525f4b3806b5f4991ae881"
     },
     "app/tests/integration/test_archive.py": {
       "role": "observe",
@@ -690,6 +696,12 @@
       "sha256": "7c2d02882d969d15bf60773fca2f44fb2e5e12594d41cd60f183668f0a822ce9",
       "size": 1648,
       "normalized_sha256": "7c2d02882d969d15bf60773fca2f44fb2e5e12594d41cd60f183668f0a822ce9"
+    },
+    "app/tests/integration/test_client.py": {
+      "role": "observe",
+      "sha256": "5363fd31cf6a4499f7defffdd3411629639fbda21e8dd8fe6708a8164c4053d9",
+      "size": 6625,
+      "normalized_sha256": "5363fd31cf6a4499f7defffdd3411629639fbda21e8dd8fe6708a8164c4053d9"
     },
     "app/tests/integration/test_corrections.py": {
       "role": "observe",
