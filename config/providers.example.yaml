@@ -1,0 +1,12 @@
+providers:
+  vendor_chat:
+    base_url: https://vendor.invalid/v1
+    credential_ref: AGI_VENDOR_CHAT_KEY
+    protocol: openai_compatible
+    capabilities: [text, streaming]
+    supported_parameters: [temperature, top_p, max_output_tokens]
+models:
+  dialogue:
+    provider_id: vendor_chat
+    model_id: CONFIGURE_ACTUAL_MODEL
+    parameters: {max_output_tokens: 4096}

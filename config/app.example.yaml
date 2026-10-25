@@ -1,0 +1,10 @@
+# Model providers are deliberately unconfigured. No fake production readiness.
+providers: {}
+models: {}
+runtime:
+  preferred: letta
+  fallback_policy: explicit_admin_selection
+data_dir: ../data
+embedding_device: cpu
+asr_device: cpu
+proactive_enabled: false

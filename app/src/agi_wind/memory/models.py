@@ -1,0 +1,11 @@
+from sqlalchemy import Table, Column, Text, Integer, Float, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
+from ..archive.models import metadata, idcol, fk, js, ts
+
+memory_items = Table("memory_items", metadata, idcol(), fk("account_id", "accounts"), fk("companion_id", "companions"), Column("user_id", UUID(as_uuid=True), ForeignKey("users.id")), Column("kind", Text, nullable=False), Column("content", Text, nullable=False), Column("epistemic_type", Text, nullable=False), Column("confidence", Float, nullable=False, default=1), Column("status", Text, nullable=False, default="active"), Column("revision", Integer, nullable=False, default=1), ts(), ts("updated_at"))
+source_refs = Table("source_refs", metadata, idcol(), fk("memory_id", "memory_items"), fk("event_id", "events"), Column("json_pointer", Text, nullable=False), Column("start_offset", Integer), Column("end_offset", Integer), Column("quote_hash", Text))
+memory_relations = Table("memory_relations", metadata, idcol(), fk("from_memory_id", "memory_items"), fk("to_memory_id", "memory_items"), Column("relation_type", Text, nullable=False))
+retrieval_chunks = Table("retrieval_chunks", metadata, idcol(), fk("account_id", "accounts"), fk("companion_id", "companions"), fk("source_id", "events"), Column("content", Text, nullable=False), Column("content_hash", Text, nullable=False), Column("source_hash",Text,nullable=False), Column("start_offset", Integer, nullable=False), Column("end_offset", Integer, nullable=False), Column("token_count", Integer, nullable=False), Column("search_terms", Text, nullable=False), Column("revision", Integer, nullable=False, default=1), UniqueConstraint("source_id", "start_offset", "content_hash"))
+embedding_spaces = Table("embedding_spaces", metadata, idcol(), Column("fingerprint", Text, nullable=False, unique=True), js("config"), Column("status", Text, nullable=False, default="building"), js("checkpoint"))
+quarantine = Table("quarantine", metadata, idcol(), fk("account_id", "accounts"), fk("companion_id", "companions"), js("candidate"), Column("reason", Text, nullable=False), ts())
+MEMORY_TABLES = ["memory_items", "source_refs", "memory_relations", "retrieval_chunks", "embedding_spaces", "quarantine"]
