@@ -64,12 +64,35 @@ class RuntimeSettings(DTO):
     fallback_policy: Literal["explicit_admin_selection"] = "explicit_admin_selection"
 
 
+class ProactiveSettings(DTO):
+    """Bounded idle-time messages. Off by default; every limit is server-enforced."""
+
+    enabled: bool = False
+    min_idle_minutes: int = Field(default=120, ge=5, le=1440)
+    min_gap_minutes: int = Field(default=180, ge=5, le=1440)
+    max_per_day: int = Field(default=3, ge=1, le=20)
+    quiet_start: str = "23:00"
+    quiet_end: str = "08:00"
+
+    @field_validator("quiet_start", "quiet_end")
+    @classmethod
+    def clock(cls, value: str) -> str:
+        value = str(value or "").strip()
+        if len(value) != 5 or value[2] != ":" or not (value[:2] + value[3:]).isdigit():
+            raise ValueError("quiet hours must use HH:MM")
+        hour, minute = int(value[:2]), int(value[3:])
+        if hour > 23 or minute > 59:
+            raise ValueError("quiet hours must use a valid HH:MM time")
+        return value
+
+
 class Settings(DTO):
     providers: dict[str, ProviderSettings] = Field(default_factory=dict)
     models: ModelRoles = Field(default_factory=ModelRoles)
     runtime: RuntimeSettings = Field(default_factory=RuntimeSettings)
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
     database_url: SecretStr = SecretStr("postgresql+psycopg://agi@127.0.0.1:55432/agi_wind")
     access_token: SecretStr | None = None
     data_dir: Path = Path("../data")
@@ -78,7 +101,6 @@ class Settings(DTO):
     max_audio_bytes: int = Field(default=20 * 1024 * 1024, gt=0)
     embedding_device: Literal["cpu"] = "cpu"
     asr_device: Literal["cpu"] = "cpu"
-    proactive_enabled: bool = False
     # Loopback-only automatic browser session: the gateway binds 127.0.0.1 and a local
     # single user should not have to paste the access token. Non-loopback clients still
     # need the token (see api.app.is_loopback).
@@ -160,6 +182,9 @@ def apply_persisted_settings(settings: Settings, data_dir: str | Path | None = N
     agent = values.get("agent", {})
     agent.update(payload.get("agent", {}))
     values["agent"] = agent
+    proactive = values.get("proactive", {})
+    proactive.update(payload.get("proactive", {}))
+    values["proactive"] = proactive
     for field in MEMORY_SETTING_FIELDS:
         if field in payload.get("memory", {}):
             values[field] = payload["memory"][field]
@@ -188,6 +213,7 @@ def _persist_settings(settings: Settings, data_dir: str | Path | None = None) ->
         "memory": {field: getattr(settings, field) for field in MEMORY_SETTING_FIELDS},
         "voice": settings.voice.model_dump(mode="json"),
         "agent": settings.agent.model_dump(mode="json"),
+        "proactive": settings.proactive.model_dump(mode="json"),
     }
     temporary = path.with_suffix(".tmp")
     temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")

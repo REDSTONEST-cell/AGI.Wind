@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse,StreamingResponse,FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine,select,text,func
 from pydantic import Field,ValidationError
-from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings
+from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings,ProactiveSettings
 from ..core.secrets import SecretStore,credential_ref_for
 from ..core.types import DTO,Actor,ChatRequest,ModelRef,Scope
 from ..core.errors import AppError
@@ -35,6 +35,7 @@ from ..memory.extraction import Extractor
 from ..memory.jobs import MEMORY_EXTRACT, enqueue_manual_extraction, run_extraction
 from ..memory.lifecycle import maintain as maintain_memories
 from ..delivery.service import GenerationService,generation_scope,TERMINAL
+from ..delivery.proactive import ProactiveService
 from ..delivery.stream import encode_sse
 from ..delivery import models as dm
 from ..voice.service import VoiceService
@@ -88,6 +89,14 @@ class VoiceSettingsPatch(DTO):
 class VoicePreviewRequest(DTO):
     text:str=Field(default="哥哥，今天也辛苦啦。",max_length=200)
     emotion:Literal["开心","平静","难过","担心","撒娇","生气","惊讶","温柔"]|None=None
+class ProactiveSettingsPatch(DTO):
+    enabled:bool|None=None
+    min_idle_minutes:int|None=Field(default=None,ge=5,le=1440)
+    min_gap_minutes:int|None=Field(default=None,ge=5,le=1440)
+    max_per_day:int|None=Field(default=None,ge=1,le=20)
+    quiet_start:str|None=Field(default=None,max_length=5)
+    quiet_end:str|None=Field(default=None,max_length=5)
+class ProactiveSendRequest(DTO): companion_id:UUID
 class ExportRequest(DTO): companion_id:UUID
 class StickerCreate(DTO):
     companion_id:UUID
@@ -203,6 +212,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     wakeup=asyncio.Event()
     service.notify=wakeup.set
+    proactive=ProactiveService(db,settings,service)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -253,12 +263,27 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                 except TimeoutError:
                     pass
         maintenance_task=asyncio.create_task(memory_maintenance_loop())
+        async def proactive_loop():
+            while not closing.is_set():
+                if settings.proactive.enabled:
+                    try:
+                        await proactive.tick()
+                    except Exception:
+                        logger.warning("proactive tick failed",exc_info=True)
+                    timeout=60
+                else:
+                    timeout=300
+                try:
+                    await asyncio.wait_for(closing.wait(),timeout=timeout)
+                except TimeoutError:
+                    pass
+        proactive_task=asyncio.create_task(proactive_loop())
         try: yield
         finally:
             closing.set(); wakeup.set()
-            for pending in (task,maintenance_task):
+            for pending in (task,maintenance_task,proactive_task):
                 pending.cancel()
-            await asyncio.gather(task,maintenance_task,return_exceptions=True)
+            await asyncio.gather(task,maintenance_task,proactive_task,return_exceptions=True)
             close_voice=getattr(voice,"close",None)
             if close_voice: await close_voice()
             if service.provider and hasattr(service.provider,"aclose"): await service.provider.aclose()
@@ -272,6 +297,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         app.add_middleware(CORSMiddleware,allow_origins=list(settings.allowed_origins),allow_methods=["*"],allow_headers=["*"],allow_credentials=False,max_age=600)
     app.state.db,app.state.service,app.state.assets=db,service,assets
     app.state.voice=voice
+    app.state.proactive=proactive
     app.state.browser_sessions=sessions
     app.state.settings=settings
     app.state.settings_store=store
@@ -796,7 +822,6 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     @app.get("/api/v1/voice/settings")
     async def get_voice_settings(current=Depends(authenticate)):
         return await voice_settings_view()
-
     @app.patch("/api/v1/voice/settings")
     async def update_voice_settings(body:VoiceSettingsPatch,current=Depends(authenticate)):
         changes=body.model_dump(exclude_unset=True,exclude_none=True)
@@ -824,6 +849,41 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     async def voices(current=Depends(authenticate)):
         view=await voice_settings_view(force_voices=True)
         return {"voices":view["voices"],"status":view["status"],"active_voice_id":view["active_voice_id"]}
+
+    def proactive_view(current, companion_id=None):
+        data=settings.proactive.model_dump(mode="json")
+        if companion_id is not None:
+            with db.engine.connect() as conn: authorize(conn,current,companion_id)
+            data.update(proactive.stats(current, companion_id))
+        return data
+
+    @app.get("/api/v1/proactive/settings")
+    def get_proactive_settings(companion_id:UUID|None=None,current=Depends(authenticate)):
+        return proactive_view(current,companion_id)
+
+    @app.patch("/api/v1/proactive/settings")
+    def update_proactive_settings(body:ProactiveSettingsPatch,current=Depends(authenticate)):
+        data=settings.proactive.model_dump()
+        data.update(body.model_dump(exclude_unset=True,exclude_none=True))
+        try: updated=ProactiveSettings.model_validate(data)
+        except ValidationError: raise AppError("INVALID_PROACTIVE_SETTINGS","主动消息设置无效",422) from None
+        settings.proactive=updated
+        persist_settings(settings)
+        logger.info("proactive settings updated enabled=%s idle=%s gap=%s max=%s",updated.enabled,updated.min_idle_minutes,updated.min_gap_minutes,updated.max_per_day)
+        return proactive_view(current)
+
+    @app.post("/api/v1/proactive/send")
+    async def send_proactive(body:ProactiveSendRequest,current=Depends(authenticate)):
+        with db.engine.connect() as conn: authorize(conn,current,body.companion_id)
+        result=await proactive.send(current,body.companion_id,force=True,trigger="manual")
+        if not result.get("sent"):
+            reason=result.get("reason") or "unknown"
+            if reason=="model_unconfigured": raise AppError("MODEL_UNCONFIGURED","请先配置聊天厂商和模型",503)
+            if reason=="no_active_conversation": raise AppError("NO_ACTIVE_CONVERSATION","当前没有进行中的对话",409)
+            if reason=="empty": raise AppError("PROACTIVE_EMPTY","模型没有生成内容，请稍后再试",502)
+            raise AppError("PROACTIVE_BUSY","正在发送主动消息，请稍后再试",409)
+        return result
+
     from ..agent.api import install_agent_routes
     install_agent_routes(app,settings,store,service,authenticate)
     return app

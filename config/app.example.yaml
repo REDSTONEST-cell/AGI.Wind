@@ -7,7 +7,13 @@ runtime:
 data_dir: ../data
 embedding_device: cpu
 asr_device: cpu
-proactive_enabled: false
+proactive:
+  enabled: false
+  min_idle_minutes: 120
+  min_gap_minutes: 180
+  max_per_day: 3
+  quiet_start: "23:00"
+  quiet_end: "08:00"
 # Optional local voice replies (Breeze-TTS). Disabled by default: enable it only after the voice
 # service is deployed with scripts/start-voice.ps1 and config/voice.local.json.
 voice:

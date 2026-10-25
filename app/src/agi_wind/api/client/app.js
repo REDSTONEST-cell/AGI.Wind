@@ -83,6 +83,8 @@ const state = {
   processRenderPending: false,
   logWidth: 420,
   historyLogged: new Set(),
+  liveWatch: null,
+  seenProactive: new Set(),
 };
 
 const LOG_KEY = 'agiwind-log-v1';
@@ -845,8 +847,57 @@ function handleHistoryVoice(event, turn) {
   }
 }
 
-async function loadChatPage(force = false) {
-  if (!state.conversation) await loadActiveConversation();
+function stopLiveWatch() {
+  const watcher = state.liveWatch;
+  state.liveWatch = null;
+  if (watcher) {
+    try { watcher.controller.abort(); } catch {}
+  }
+}
+
+function startLiveWatch(conversationId) {
+  if (!conversationId) return;
+  if (state.liveWatch && state.liveWatch.conversationId === conversationId) return;
+  stopLiveWatch();
+  const watcher = { conversationId, controller: new AbortController(), cursor: 0 };
+  state.liveWatch = watcher;
+  const appendProactive = (payload) => {
+    const eventId = String(payload.event_id || '');
+    if (eventId && state.seenProactive.has(eventId)) return;
+    if (eventId) state.seenProactive.add(eventId);
+    const text = String(payload.text || '').trim();
+    if (!text || !state.conversation || state.conversation.id !== conversationId) return;
+    const messages = $('#messages');
+    if (!messages) return;
+    appendMessage('assistant', text, { time: payload.recorded_at, animate: true });
+    scrollToEnd(true);
+    logEvent('chat', '收到主动消息', '来自 ' + (state.personaName || '她'), { generation_id: payload.event_id });
+  };
+  const run = async () => {
+    while (state.liveWatch === watcher && !watcher.controller.signal.aborted) {
+      try {
+        const path = '/api/v1/conversations/' + encodeURIComponent(conversationId) + '/live?after=' + watcher.cursor;
+        await client.stream(path, {
+          signal: watcher.controller.signal,
+          onEvent: (event) => {
+            const sequence = Number((event.data && event.data.sequence) || event.id || 0);
+            if (sequence > watcher.cursor) watcher.cursor = sequence;
+            if (event.type !== 'proactive.message') return;
+            const payload = (event.data && event.data.payload) || {};
+            appendProactive(payload);
+          },
+        });
+      } catch (error) {
+        if (watcher.controller.signal.aborted) return;
+      }
+      if (state.liveWatch !== watcher) return;
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+  };
+  run();
+}
+
+async function loadChatPage(force = false) {  if (!state.conversation) await loadActiveConversation();
   else if (force) await loadHistory();
   requestAnimationFrame(() => {
     if (state.currentPage === 'chat') scrollToEnd(true);
@@ -1722,6 +1773,7 @@ function scrollToEnd(force = false) {
 }
 
 function clearChat() {
+  stopLiveWatch();
   stopAllAudio();
   $('#messages').replaceChildren();
   delete $('#messages').dataset.lastMessageAt;
@@ -1739,6 +1791,7 @@ async function loadHistory() {
     const events = await client.history(state.conversation.id);
     for (const event of events) {
       if(!['user_input','assistant_output'].includes(event.kind))continue;
+      if (event.content?.proactive && event.id) state.seenProactive.add(String(event.id));
       logHistoryProcessing(event);
       const text = event.content && (event.content.text || '');
       const attachments=event.attachments||event.content?.attachments||[];
@@ -1753,6 +1806,7 @@ async function loadHistory() {
     }
     showChatEmpty($('#messages').children.length === 0);
     scrollToEnd(true);
+    startLiveWatch(state.conversation.id);
   } catch (error) {
     toast('读取历史失败：' + error.message);
     logEvent('error', '读取历史失败', error.message);
@@ -2931,6 +2985,94 @@ async function saveTtsSettings() {
   }
 }
 
+async function loadProactiveSettings() {
+  const form = $('#proactive-settings-form');
+  if (!form) return;
+  if (!state.companionId) { form.hidden = true; return; }
+  form.hidden = false;
+  try {
+    const data = await client.request('/api/v1/proactive/settings?companion_id=' + encodeURIComponent(state.companionId));
+    $('#proactive-enabled').checked = Boolean(data.enabled);
+    $('#proactive-idle').value = data.min_idle_minutes;
+    $('#proactive-gap').value = data.min_gap_minutes;
+    $('#proactive-max').value = data.max_per_day;
+    $('#proactive-quiet-start').value = data.quiet_start;
+    $('#proactive-quiet-end').value = data.quiet_end;
+    $('#proactive-state').textContent = data.enabled ? '已开启' : '已关闭';
+    const parts = [];
+    if (Number.isFinite(Number(data.sent_today))) parts.push('今天已发 ' + data.sent_today + ' 条');
+    if (data.last_sent_at) {
+      try { parts.push('最近 ' + new Date(data.last_sent_at).toLocaleString()); } catch {}
+    }
+    if (data.reason && data.reason !== 'ok' && data.enabled) parts.push('当前不会发送：' + proactiveReasonLabel(data.reason));
+    $('#proactive-meta').textContent = parts.join(' · ');
+    $('#proactive-hint').textContent = '';
+  } catch (error) {
+    $('#proactive-hint').textContent = '读取失败：' + error.message;
+  }
+}
+
+function proactiveReasonLabel(reason) {
+  return ({
+    disabled: '功能默认关闭',
+    no_active_conversation: '没有进行中的对话',
+    generation_running: '正在生成回复',
+    not_idle: '用户还在活跃',
+    gap: '距上一条太近',
+    daily_cap: '已达到今日上限',
+    quiet_hours: '处于安静时段',
+    model_unconfigured: '对话模型未配置',
+  })[reason] || reason;
+}
+
+async function saveProactiveSettings(event) {
+  event.preventDefault();
+  if (!state.companionId) return;
+  const hint = $('#proactive-hint');
+  const button = event.target.querySelector('button[type=submit]');
+  if (button) button.disabled = true;
+  hint.textContent = '正在保存…';
+  try {
+    const data = await client.request('/api/v1/proactive/settings', {
+      method: 'PATCH',
+      body: {
+        enabled: $('#proactive-enabled').checked,
+        min_idle_minutes: Number($('#proactive-idle').value),
+        min_gap_minutes: Number($('#proactive-gap').value),
+        max_per_day: Number($('#proactive-max').value),
+        quiet_start: $('#proactive-quiet-start').value,
+        quiet_end: $('#proactive-quiet-end').value,
+      },
+    });
+    $('#proactive-state').textContent = data.enabled ? '已开启' : '已关闭';
+    hint.textContent = '已保存';
+    logEvent('system', '主动消息设置已保存', data.enabled ? '已开启' : '已关闭');
+    await loadProactiveSettings();
+  } catch (error) {
+    hint.textContent = '保存失败：' + error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function testProactiveMessage() {
+  if (!state.companionId) return;
+  const hint = $('#proactive-hint');
+  const button = $('#proactive-test');
+  if (button) button.disabled = true;
+  hint.textContent = '正在生成…';
+  try {
+    await client.request('/api/v1/proactive/send', { method: 'POST', body: { companion_id: state.companionId } });
+    hint.textContent = '已发送';
+    await loadProactiveSettings();
+  } catch (error) {
+    hint.textContent = '发送失败：' + error.message;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+
 async function previewTts() {
   const text = ($('#tts-test-text')?.value || '').trim();
   const emotion = $('#tts-emotion')?.value || '';
@@ -2958,6 +3100,7 @@ async function previewTts() {
 
 async function loadModelPage() {
   await loadModelChip();
+  await loadProactiveSettings().catch(() => {});
   if (state.modelTab === 'tts') {
     await loadTtsData();
     const providerLayout = $('.provider-layout');
@@ -3418,6 +3561,8 @@ function bind() {
   $('#memory-recall-form').addEventListener('submit', runRecallTest);
   $('#memory-maintain').addEventListener('click', maintainMemories);
   $('#memory-settings-form').addEventListener('submit', saveMemorySettings);
+  $('#proactive-settings-form').addEventListener('submit', saveProactiveSettings);
+  $('#proactive-test').addEventListener('click', testProactiveMessage);
   $('#memory-embedding-open').addEventListener('click', openEmbeddingSettings);
   $('#memory-refresh').addEventListener('click', loadMemoryPage);
   $('#memory-jobs-refresh').addEventListener('click', loadMemoryJobs);

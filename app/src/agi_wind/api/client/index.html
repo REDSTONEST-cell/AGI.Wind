@@ -502,6 +502,30 @@
             <p class="meta" id="tts-status"></p>
             <audio id="tts-preview-player" controls hidden></audio>
           </div>
+
+          <form class="card" id="proactive-settings-form">
+            <div class="section-head">
+              <div>
+                <h2>主动消息</h2>
+                <p class="meta">空闲一段时间后，她可以主动发一条消息。默认关闭，空闲/间隔/每日上限和安静时段都由服务端执行。</p>
+              </div>
+              <span class="chip" id="proactive-state">读取中…</span>
+            </div>
+            <div class="tts-grid">
+              <label class="field tts-check"><span>启用主动消息</span><input id="proactive-enabled" type="checkbox"></label>
+              <label class="field"><span>空闲多久后（分钟）</span><input id="proactive-idle" class="input" type="number" min="5" max="1440"></label>
+              <label class="field"><span>两条之间至少间隔（分钟）</span><input id="proactive-gap" class="input" type="number" min="5" max="1440"></label>
+              <label class="field"><span>每天最多</span><input id="proactive-max" class="input" type="number" min="1" max="20"></label>
+              <label class="field"><span>安静开始</span><input id="proactive-quiet-start" class="input" type="time"></label>
+              <label class="field"><span>安静结束</span><input id="proactive-quiet-end" class="input" type="time"></label>
+            </div>
+            <p class="meta" id="proactive-meta"></p>
+            <div class="row end">
+              <button class="btn ghost small" id="proactive-test" type="button">现在发一条</button>
+              <button class="btn primary small" type="submit">保存设置</button>
+            </div>
+            <p class="meta" id="proactive-hint" role="status" aria-live="polite"></p>
+          </form>
         </section>
 
         <!-- 连接 -->
@@ -743,6 +767,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script type="module" src="/client/app.js?v=20261026d"></script>
+  <script type="module" src="/client/app.js?v=20261026e"></script>
 </body>
 </html>

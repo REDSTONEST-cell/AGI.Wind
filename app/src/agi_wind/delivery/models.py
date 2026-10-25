@@ -8,4 +8,15 @@ delivery_commands = Table("delivery_commands", metadata, idcol(), fk("generation
 speech_segments = Table("speech_segments", metadata, idcol(), fk("generation_id", "generations"), Column("epoch", Integer, nullable=False), Column("segment_index", Integer, nullable=False), Column("source_event_id", UUID(as_uuid=True), ForeignKey("events.id")), Column("display_text", Text, nullable=False), Column("spoken_text", Text, nullable=False), Column("voice_id", Text, nullable=False), Column("voice_version", Text, nullable=False), Column("asset_id", UUID(as_uuid=True), ForeignKey("assets.id")), Column("sample_rate", Integer), Column("channels", Integer), Column("duration_ms", Integer), Column("state", Text, nullable=False, default="queued"), Column("error_code", Text), UniqueConstraint("generation_id", "epoch", "segment_index"))
 avatar_cues = Table("avatar_cues", metadata, idcol(), fk("generation_id", "generations"), Column("epoch", Integer, nullable=False), Column("segment_id", UUID(as_uuid=True), ForeignKey("speech_segments.id")), js("cue"))
 playback_receipts = Table("playback_receipts", metadata, fk("segment_id", "speech_segments", primary_key=True), Column("device_id", Text, primary_key=True), fk("generation_id", "generations"), Column("state", Text, nullable=False), Column("played_ms", Integer, nullable=False), ts("received_at"))
+proactive_messages = Table(
+    "proactive_messages",
+    metadata,
+    idcol(),
+    Column("account_id", UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False),
+    Column("companion_id", UUID(as_uuid=True), ForeignKey("companions.id", ondelete="CASCADE"), nullable=False),
+    Column("conversation_id", UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("event_id", UUID(as_uuid=True), ForeignKey("events.id", ondelete="CASCADE"), nullable=False),
+    Column("trigger", Text, nullable=False, default="schedule"),
+    ts(),
+)
 DELIVERY_TABLES = ["generation_stream_events", "conversation_live_events", "delivery_commands", "speech_segments", "avatar_cues", "playback_receipts"]

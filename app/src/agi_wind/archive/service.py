@@ -1,5 +1,6 @@
 from uuid import uuid4
 from contextlib import nullcontext
+from datetime import datetime, timezone
 from sqlalchemy import select
 from . import models as m
 from .repository import authorized_conversation, digest, lock
@@ -68,3 +69,75 @@ class ArchiveService:
                 conversation = conn.execute(select(m.conversations).where(m.conversations.c.id == request["conversation_id"])).mappings().one()
                 result = conn.execute(m.events.insert().values(account_id=conversation["account_id"], companion_id=conversation["companion_id"], conversation_id=conversation["id"], request_id=request["id"], generation_id=generation_id, role="assistant", kind="assistant_output", content=content, content_sha256=digest(content)).returning(m.events)).mappings().one()
         return dict(result)
+
+    def create_proactive_message(self, actor, conversation_id, text, model_ref=None, runtime="proactive", trigger="schedule"):
+        """Archive an unsolicited assistant message without inventing a user turn."""
+        text = str(text or "").strip()
+        if not text:
+            raise AppError("EMPTY_PROACTIVE_MESSAGE", "主动消息为空", 422)
+        request_id, generation_id, event_id = uuid4(), uuid4(), uuid4()
+        content = {"text": text, "state": "complete", "proactive": True, "trigger": trigger}
+        with self.db.engine.begin() as conn:
+            conversation = authorized_conversation(conn, actor, conversation_id)
+            lock(conn, conversation["companion_id"])
+            if conversation.get("state", "active") != "active":
+                raise AppError("CONVERSATION_NOT_ACTIVE", "这段对话已归档，不能主动发消息", 409)
+            companion = conn.execute(select(m.companions).where(m.companions.c.id == conversation["companion_id"])).mappings().one()
+            conn.execute(
+                m.requests.insert().values(
+                    id=request_id,
+                    account_id=actor.account_id,
+                    conversation_id=conversation_id,
+                    input_hash=digest({"proactive_event_id": str(event_id)}),
+                    input={"text": ""},
+                    output={},
+                    device_id="proactive",
+                    generation_id=generation_id,
+                    state="accepted",
+                )
+            )
+            conn.execute(
+                m.generations.insert().values(
+                    id=generation_id,
+                    request_id=request_id,
+                    memory_revision=companion["memory_revision"],
+                    persona_version=companion["active_persona_version"],
+                    model_ref=(model_ref.model_dump(mode="json") if model_ref else {}),
+                    runtime=runtime,
+                    state="completed",
+                    finished_at=m.now(),
+                )
+            )
+            conn.execute(
+                m.events.insert().values(
+                    id=event_id,
+                    account_id=actor.account_id,
+                    companion_id=companion["id"],
+                    conversation_id=conversation_id,
+                    request_id=request_id,
+                    generation_id=generation_id,
+                    role="assistant",
+                    kind="assistant_output",
+                    content=content,
+                    content_sha256=digest(content),
+                )
+            )
+            from ..delivery.stream import emit_live
+            emit_live(
+                conn,
+                conversation_id,
+                "proactive.message",
+                {
+                    "event_id": str(event_id),
+                    "conversation_id": str(conversation_id),
+                    "text": text,
+                    "recorded_at": datetime.now(timezone.utc).isoformat(),
+                    "trigger": trigger,
+                },
+            )
+        return {
+            "event_id": event_id,
+            "generation_id": generation_id,
+            "conversation_id": conversation_id,
+            "text": text,
+        }
