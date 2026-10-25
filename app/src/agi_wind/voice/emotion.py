@@ -45,7 +45,12 @@ INSTRUCTIONS = {
 _DIRECTIVE = re.compile(
     r"^\s*(?:\[|【)\s*(情绪|表情包)\s*(?:[:：]\s*([^\]】\n]{0,40}?))?\s*(?:\]|】)"
 )
-_DIRECTIVE_PREFIXES = ("[情绪", "[表情包", "【情绪", "【表情包")
+_BARE_EMOTION = re.compile(
+    r"^\s*(?:\[|【)\s*(" + "|".join(re.escape(value) for value in (*EMOTIONS, *ALIASES)) + r")\s*(?:\]|】)"
+)
+_DIRECTIVE_PREFIXES = ("[情绪", "[表情包", "【情绪", "【表情包") + tuple(
+    "[" + name for name in (*EMOTIONS, *ALIASES)
+) + tuple("【" + name for name in (*EMOTIONS, *ALIASES))
 
 
 class EmotionTagStream:
@@ -72,6 +77,12 @@ class EmotionTagStream:
         while True:
             match = _DIRECTIVE.match(self.buffer)
             if not match:
+                bare = _BARE_EMOTION.match(self.buffer)
+                if bare:
+                    self.raw_tag = bare.group(1).strip("。.!！?？ ")
+                    self.emotion = normalize_emotion(self.raw_tag)
+                    self.buffer = self.buffer[bare.end():]
+                    continue
                 return
             name, value = match.group(1), (match.group(2) or "").strip()
             if name == "情绪":

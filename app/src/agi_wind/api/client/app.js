@@ -167,6 +167,13 @@ function formatLogTime(value) {
   return date.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+function stripHiddenReplyPrefix(value) {
+  return String(value || '').replace(
+    /^\s*[\[【]\s*(?:情绪\s*[:：][^\]】\n]{1,12}|开心|平静|难过|担心|撒娇|生气|惊讶|温柔|高兴|快乐|喜悦|悲伤|伤心|失落|害怕|焦虑|愤怒|不满|吃惊|意外|柔和|亲切)\s*[\]】]\s*/,
+    '',
+  );
+}
+
 function appendTermLine(line, { defer = false } = {}) {
   const entry = {
     cat: ['sys','proc'].includes(line.cat) ? line.cat : 'act',
@@ -198,8 +205,15 @@ function logProcessing(generationId,type,payload) {
     }
     line.text=line.text+(payload.text||'');
   }else{
-    const status=type==='tool.started'?'进行中':({completed:'完成',failed:'失败',skipped:'已跳过'}[payload.status]||payload.status);
-    appendTermLine({cat:'proc',tag:'TOOL',level:payload.status==='failed'?'error':'info',text:stage+' · '+payload.tool+' · '+status+' · '+(payload.summary||'')},{defer:true});
+    const toolName=payload.tool||payload.name||payload.data?.tool||'';
+    if(!toolName)return;
+    const rawStatus=payload.status||payload.data?.status;
+    const status=type==='tool.started'?'进行中':({completed:'完成',failed:'失败',skipped:'已跳过'}[rawStatus]||rawStatus||'完成');
+    const summary=payload.summary||payload.message||payload.data?.summary||'';
+    const text=stage+' · '+toolName+' · '+status+(summary?' · '+summary:'');
+    const last=state.termLines[state.termLines.length-1];
+    if(last&&last.tag==='TOOL'&&last.text===text&&Date.now()-new Date(last.ts).getTime()<3000)return;
+    appendTermLine({cat:'proc',tag:'TOOL',level:rawStatus==='failed'?'error':'info',text},{defer:true});
   }
   if(!state.logOpen){state.logUnread++;updateLogBadge();return;}
   if(state.processRenderPending)return;
@@ -215,12 +229,12 @@ function logHistoryProcessing(event) {
   let replied=false;
   for(const step of event.trace||event.content?.trace||[]){
     if(!replied&&(step.stage==='reflect'||step.tool==='reply')){
-      logProcessing(key,'text.delta',{stage:'reply',text:event.content?.text||''});replied=true;
+      logProcessing(key,'text.delta',{stage:'reply',text:stripHiddenReplyPrefix(event.content?.text||'')});replied=true;
     }
     if(step.type==='reasoning')logProcessing(key,'reasoning.delta',step);
     else if(step.type==='tool')logProcessing(key,'tool.completed',step);
   }
-  if(!replied&&event.content?.text)logProcessing(key,'text.delta',{stage:'reply',text:event.content.text});
+  if(!replied&&event.content?.text)logProcessing(key,'text.delta',{stage:'reply',text:stripHiddenReplyPrefix(event.content.text)});
 }
 
 function setLogWidth(value,{persist=false}={}) {
@@ -1522,7 +1536,7 @@ function createLiveReplyTurn(container, options = {}, first = null) {
   };
 
   async function typeItem(item, text) {
-    const value = String(text || '');
+    const value = stripHiddenReplyPrefix(text);
     item.kind = 'text';
     item.node.dataset.messageKind = 'text';
     item.node.hidden = false;
@@ -1769,6 +1783,8 @@ function renderHistorySegments(container, event) {
   appendChatTime(container, event.recorded_at);
   const pending = new Map();
   for (const segment of segments) {
+    const segmentText = stripHiddenReplyPrefix(segment.text || '');
+    if (!segmentText && segment.kind !== 'voice') continue;
     if (segment.kind === 'voice' && segment.segment_id) {
       const segmentId = String(segment.segment_id);
       const info = voices.get(segmentId) || {};
@@ -1781,16 +1797,16 @@ function renderHistorySegments(container, event) {
         createAudioMessage(client, message, { state: 'ready', attachment: audio, segment_id: segmentId, autoplay: false });
       } else if (info.state === 'queued' || info.state === 'synthesizing') {
         const player = createAudioMessage(client, message, { state: info.state, segment_id: segmentId, autoplay: false });
-        pending.set(segmentId, { message, player, text: segment.text || '' });
+        pending.set(segmentId, { message, player, text: segmentText });
       } else {
         message.node.dataset.messageKind = 'text';
         message.body.hidden = false;
-        message.body.innerHTML = renderMarkdown(segment.text || '');
+        message.body.innerHTML = renderMarkdown(segmentText);
         message.meta.append(el('span', { class: 'meta', text: '语音不可用，显示文字' }));
       }
     } else {
       const message = messageNode('assistant', '', {});
-      message.body.innerHTML = renderMarkdown(segment.text || '');
+      message.body.innerHTML = renderMarkdown(segmentText);
       container.append(message.node);
     }
   }
@@ -1854,7 +1870,7 @@ async function loadHistory() {
       if(!['user_input','assistant_output'].includes(event.kind))continue;
       if (event.content?.proactive && event.id) state.seenProactive.add(String(event.id));
       logHistoryProcessing(event);
-      const text = event.content && (event.content.text || '');
+      const text = stripHiddenReplyPrefix(event.content && (event.content.text || ''));
       const attachments=event.attachments||event.content?.attachments||[];
       if (!text&&!attachments.length) continue;
       const role = event.role === 'assistant' ? 'assistant' : 'user';
