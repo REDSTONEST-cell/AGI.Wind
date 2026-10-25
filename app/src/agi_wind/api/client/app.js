@@ -172,6 +172,7 @@ function appendTermLine(line, { defer = false } = {}) {
     cat: ['sys','proc'].includes(line.cat) ? line.cat : 'act',
     level: ['info', 'warn', 'error'].includes(line.level) ? line.level : 'info',
     tag: line.tag || (line.cat === 'sys' ? 'OUT' : 'ACT'),
+    group: line.group || (line.cat === 'sys' ? 'sys' : ''),
     stream: line.stream || '',
     text: String(line.text || ''),
     fields: line.fields && typeof line.fields === 'object' ? line.fields : null,
@@ -304,9 +305,59 @@ function seedTermFromActivity() {
 }
 
 function termLevel(text) {
-  if (/\b(ERROR|CRITICAL|FATAL|Traceback|Exception)\b/i.test(text)) return 'error';
-  if (/\bWARN(ING)?\b/i.test(text)) return 'warn';
+  if (/\b(ERROR|CRITICAL|FATAL|Traceback|Exception)\b/i.test(text) || /失败|错误|异常|崩溃/.test(text)) return 'error';
+  if (/\bWARN(ING)?\b/i.test(text) || /警告|超时/.test(text)) return 'warn';
   return 'info';
+}
+
+const SYSTEM_GROUPS = {
+  api: '接口',
+  gen: '生成',
+  voice: '语音',
+  memory: '记忆',
+  agent: 'Agent',
+  proactive: '主动',
+  sys: '系统',
+};
+
+function systemLineGroup(raw) {
+  const module = (String(raw).match(/\[(agi_wind[^\]]*)\]/) || [])[1] || '';
+  const name = module.toLowerCase();
+  if (/voice|tts/.test(name)) return 'voice';
+  if (/memory/.test(name)) return 'memory';
+  if (/agent/.test(name)) return 'agent';
+  if (/proactive/.test(name)) return 'proactive';
+  if (/delivery/.test(name)) return 'gen';
+  if (/^http\b/i.test(String(raw).trim()) || /\bhttp\s+(?:GET|POST|PUT|PATCH|DELETE)\b/i.test(String(raw))) return 'api';
+  return 'sys';
+}
+
+function localizeSystemText(raw) {
+  let text = String(raw).replace(/\[agi_wind(?:\.[a-z_]+)*\]\s*/g, '').replace(/^(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL)\s+/i, '').trim();
+  const translations = [
+    [/^http (\w+) (\S+) -> (\d+) (\d+)ms$/, (_, method, path, status, ms) => `接口 ${method} ${path} · ${status} · ${ms}ms`],
+    [/^generation (\S+) running provider=(\S+) model=(\S+)$/, (_, id, provider, model) => `开始生成 · ${provider}/${model}`],
+    [/^generation (\S+) completed$/, () => '生成完成'],
+    [/^generation (\S+) failed code=(\S+)$/, (_, id, code) => `生成失败 · ${code}`],
+    [/^voice synthesized voice_id=(\S+) seconds=([\d.]+) total_ms=(\d+) rtf=([\d.]+) first_audio_ms=(\S+)$/, (_, voice, seconds, ms, rtf, first) => `语音合成完成 · 音色 ${voice} · ${seconds}s · 耗时 ${ms}ms · 首音 ${first}ms · RTF ${rtf}`],
+    [/^voice settings updated enabled=(\w+) voice=(\S+) probability=([\d.]+)$/, (_, enabled, voice, probability) => `语音设置已更新 · ${enabled === 'True' ? '开启' : '关闭'} · 音色 ${voice} · 概率 ${Math.round(Number(probability) * 100)}%`],
+    [/^voice health check failed$/, () => '语音健康检查失败'],
+    [/^voice director fallback failed generation=(\S+)$/, () => '语音情绪兜底失败'],
+    [/^sticker auto-tag failed asset=(\S+)$/, (_, asset) => `表情包自动标签失败 · ${String(asset).slice(0, 8)}`],
+    [/^memory extracted companion=(\S+) events=(\d+) candidates=(\d+) stored=(\d+) reinforced=(\d+) quarantined=(\d+) ignored=(\d+) calls=(\S+)$/, (_, companion, events, candidates, stored, reinforced, quarantined, ignored, calls) => `记忆提炼 · 事件 ${events} · 候选 ${candidates} · 写入 ${stored} · 强化 ${reinforced} · 隔离 ${quarantined} · 调用 ${calls}`],
+    [/^proactive message sent companion=(\S+) conversation=(\S+) trigger=(\S+)$/, () => '主动消息已发送'],
+    [/^proactive settings updated enabled=(\w+) idle=(\d+) gap=(\d+) max=(\d+)$/, () => '主动消息设置已更新'],
+    [/^client key session created from (\S+)$/, (_, ip) => `客户端密钥登录 · ${ip}`],
+    [/^provider (\S+) saved$/, (_, provider) => `模型厂商已保存 · ${provider}`],
+    [/^provider (\S+) deleted$/, (_, provider) => `模型厂商已删除 · ${provider}`],
+    [/^model role (\S+) -> (\S+)\/(\S+)$/, (_, role, provider, model) => `模型角色已设置 · ${role} → ${provider}/${model}`],
+    [/^conversation started (\S+)$/, () => '对话已创建'],
+    [/^conversation (\S+) state -> (\S+)$/, (_, id, state) => `对话状态 · ${state}`],
+  ];
+  for (const [pattern, replace] of translations) {
+    if (pattern.test(text)) return text.replace(pattern, replace);
+  }
+  return text;
 }
 
 function appendSystemLines(lines, reset) {
@@ -323,12 +374,14 @@ function appendSystemLines(lines, reset) {
       ts = date.toISOString();
       text = stamped[4];
     }
+    const group = systemLineGroup(text);
     appendTermLine({
       cat: 'sys',
+      group,
       stream: line.stream,
       level: termLevel(text),
-      tag: 'SYS',
-      text,
+      tag: SYSTEM_GROUPS[group] || '系统',
+      text: localizeSystemText(text),
       ts,
     }, { defer: true });
     added += 1;
@@ -345,7 +398,8 @@ function filteredTermRows() {
   return state.termLines.filter((row) => {
     if (state.termFilter === 'error' && row.level !== 'error') return false;
     if (state.termFilter === 'warn' && row.level !== 'warn') return false;
-    if (!['all', 'error', 'warn'].includes(state.termFilter) && row.cat !== state.termFilter) return false;
+    if (!['all', 'error', 'warn', 'sys', 'proc', 'act'].includes(state.termFilter) && (row.group || row.cat) !== state.termFilter) return false;
+    if (['sys', 'proc', 'act'].includes(state.termFilter) && row.cat !== state.termFilter) return false;
     if (!query) return true;
     const searchable = [row.text, row.tag, row.level, row.stream, row.fields ? JSON.stringify(row.fields) : ''].join(' ').toLowerCase();
     return searchable.includes(query);
@@ -392,6 +446,7 @@ function renderTerm() {
       const entry = el('div', {
         class: 'term-entry',
         'data-cat': row.cat,
+        'data-group': row.group || row.cat,
         'data-level': row.level,
         'data-stream': row.stream || '',
       }, [
