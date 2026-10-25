@@ -187,15 +187,30 @@ class GenerationService:
                 if voice_mode == "always" and not voice_possible:
                     voice_warning = ("TTS_UNAVAILABLE", "语音服务未就绪，本次只发送文字")
                 tone = str((context.persona_snapshot.style or {}).get("tone") or "")
+                voice_turn = False
+                if voice_possible:
+                    voice_turn = voice_mode == "always" or (
+                        voice_mode == "auto" and self.random_value() < self.voice.probability
+                    )
+                voice_streak = 0
 
                 async def handle_segment(segment_text):
+                    nonlocal voice_streak
                     index = len(segments)
                     info = {"index": index, "text": segment_text, "kind": "text"}
-                    if voice_possible and self.voice_segment_wanted(voice_mode):
+                    use_voice = voice_turn
+                    if use_voice and voice_mode == "auto" and voice_streak >= 2:
+                        # A voice turn may drop one text segment after two voice segments so the
+                        # rhythm looks less like a wall of audio; always-mode stays all voice.
+                        if self.random_value() < self.voice.settings.text_break_probability:
+                            use_voice = False
+                            voice_streak = 0
+                    if use_voice:
                         spoken = clean_for_speech(segment_text, self.voice.settings.max_chars)
                         if spoken.text:
                             info["kind"] = "voice"
                             info["segment_id"] = str(uuid4())
+                            voice_streak += 1
                     segments.append(info)
                     payload = {"index": index, "text": segment_text, "kind": info["kind"], "complete": True}
                     if info["kind"] == "voice":

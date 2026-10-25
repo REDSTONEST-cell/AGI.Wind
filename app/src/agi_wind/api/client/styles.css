@@ -926,8 +926,13 @@ main:has(>.page[data-page="chat"]:not([hidden])) { --pad-top: 10px; --pad-bottom
 }
 
 .agent-approval-dialog {
-  width: min(640px, calc(100vw - 32px));
-  max-height: min(80vh, 720px);
+  position: fixed;
+  inset: 88px 16px auto auto;
+  margin: 0;
+  z-index: 1000;
+  width: min(480px, calc(100vw - 32px));
+  max-height: min(55vh, 560px);
+  overflow: auto;
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 20px;

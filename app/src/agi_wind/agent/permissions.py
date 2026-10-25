@@ -37,8 +37,9 @@ class ApprovalQueue:
             raise AppError('APPROVAL_NOT_FOUND', '请求已过期或无权访问', 404)
         item[2].set_result(allow)
 
-    def revoke(self):
-        for _, _, future in self.pending.values():
+    def revoke(self, actor=None):
+        for owner, _, future in self.pending.values():
+            if actor is not None and owner != self.owner(actor): continue
             if not future.done(): future.set_result(False)
 
 

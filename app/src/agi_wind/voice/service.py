@@ -47,7 +47,7 @@ class VoiceService:
         self._engine_key: tuple[str, float] | None = None
         self._lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
-        self._active: set[UUID] = set()
+        self._active: dict[UUID, int] = {}
         self._health_at = 0.0
         self._health_value: dict = {}
         self._voices_at = 0.0
@@ -274,7 +274,9 @@ class VoiceService:
         emotion: str | None = None,
         emotion_source: str | None = None,
     ) -> None:
-        self._active.add(generation_id)
+        # Reference-count per generation: a finished segment must not clear the active flag
+        # while another segment of the same turn is still queued/synthesizing.
+        self._active[generation_id] = self._active.get(generation_id, 0) + 1
 
         async def runner():
             try:
@@ -282,7 +284,11 @@ class VoiceService:
                     generation_id, segment_id, scope, provider, model, user_text, reply_text, tone, emotion, emotion_source
                 )
             finally:
-                self._active.discard(generation_id)
+                remaining = self._active.get(generation_id, 0) - 1
+                if remaining > 0:
+                    self._active[generation_id] = remaining
+                else:
+                    self._active.pop(generation_id, None)
 
         task = asyncio.create_task(runner())
         self._tasks.add(task)

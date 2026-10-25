@@ -666,19 +666,15 @@ function updateVoiceControls() {
   state.voiceProbability = probability;
   const toggle = $('#voice-toggle');
   if (toggle) toggle.setAttribute('aria-checked', String(Boolean(state.voiceAlways)));
-  const chip = $('#voice-prob');
-  if (chip) chip.textContent = state.voiceAlways ? '语音 始终' : '语音 ' + probability + '%';
-  const range = $('#voice-prob-range');
-  if (range) {
-    range.value = String(probability);
-    range.disabled = false;
-  }
-  const value = $('#voice-prob-value');
-  if (value) value.textContent = probability + '%';
   const ttsRange = $('#tts-probability');
   if (ttsRange) ttsRange.value = String(probability);
   const ttsValue = $('#tts-probability-value');
   if (ttsValue) ttsValue.textContent = probability + '%';
+  const breakProbability = Math.round(Number(state.voiceSettings?.text_break_probability ?? 0.35) * 100);
+  const breakRange = $('#tts-break-probability');
+  if (breakRange) breakRange.value = String(breakProbability);
+  const breakValue = $('#tts-break-probability-value');
+  if (breakValue) breakValue.textContent = breakProbability + '%';
 }
 
 function setVoiceAlways(value, { notify = true } = {}) {
@@ -1526,6 +1522,11 @@ function createLiveReplyTurn(container, options = {}, first = null) {
     }
     item.kind = 'text';
     item.node.dataset.messageKind = 'text';
+    item.node.classList.remove('voice-pending');
+    if (item.audio) {
+      try { item.audio.destroy(); } catch {}
+      item.audio = null;
+    }
     item.body.hidden = false;
     item.body.innerHTML = renderMarkdown(entry.text);
     item.node.classList.add('voice-fallback');
@@ -1559,6 +1560,11 @@ function createLiveReplyTurn(container, options = {}, first = null) {
           } else if (job.type === 'voice') {
             job.item.node.hidden = false;
             job.item.node.dataset.messageKind = 'text';
+            job.item.node.classList.remove('voice-pending');
+            if (job.item.audio) {
+              try { job.item.audio.destroy(); } catch {}
+              job.item.audio = null;
+            }
             job.item.body.hidden = false;
             job.item.body.innerHTML = renderMarkdown(job.entry.text || '');
           }
@@ -2319,19 +2325,45 @@ async function sendMessage(text) {
   }
 }
 
+function isStopCommand(text) {
+  return /^(?:\/\s*)?(?:stop|停止)$/i.test(text.trim());
+}
+
 function setBusy(busy) {
   state.busy=busy;
-  $('#send').disabled = busy||state.uploadingImages;
+  $('#send').disabled = state.uploadingImages || (busy && !isStopCommand($('#input').value));
   $('#chat-images').disabled=busy||state.uploadingImages;
   $('#stop').hidden = !busy;
 }
 
 async function stopGeneration() {
-  if (!state.streaming) return;
-  const { generationId, controller } = state.streaming;
-  logEvent('chat', '请求停止生成', 'generation ' + String(generationId).slice(0, 8));
-  try { await client.interrupt(generationId, uuid()); } catch { /* 停止失败也先断开本地流 */ }
-  controller.abort();
+  const streaming = state.streaming;
+  stopAllAudio();
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(), 5000);
+  try {
+    let result;
+    try {
+      result = await client.request('/api/v1/agent/stop', { method: 'POST', signal: timeout.signal });
+    } catch (error) {
+      if (error.status !== 404) throw error;
+      // The running service can use its existing interrupt API until its next restart.
+      const pending = await client.request('/api/v1/agent/approvals', { signal: timeout.signal });
+      const ids = new Set(pending.items.map(item => item.generation_id));
+      if (streaming) ids.add(streaming.generationId);
+      for (const id of ids) await client.request('/api/v1/generations/' + encodeURIComponent(id) + '/interrupt', { method: 'POST', body: { command_id: uuid() }, signal: timeout.signal });
+      result = { stopped: ids.size };
+    }
+    document.dispatchEvent(new Event('agi-agent-stopped'));
+    toast('已停止当前动作');
+    logEvent('system', '停止命令', '已停止 ' + result.stopped + ' 个回答任务');
+  } catch (error) {
+    toast('本地播放已停止，服务端停止未确认：' + error.message);
+  } finally {
+    clearTimeout(timer);
+    streaming?.controller.abort();
+    setBusy(false);
+  }
 }
 
 /* ---------- 图片与表情包 ---------- */
@@ -2932,6 +2964,11 @@ function renderTtsSettings() {
   if (range) range.value = String(probability);
   const rangeValue = $('#tts-probability-value');
   if (rangeValue) rangeValue.textContent = probability + '%';
+  const breakProbability = Math.round(Number(settings.text_break_probability ?? 0.35) * 100);
+  const breakRange = $('#tts-break-probability');
+  if (breakRange) breakRange.value = String(breakProbability);
+  const breakValue = $('#tts-break-probability-value');
+  if (breakValue) breakValue.textContent = breakProbability + '%';
   const maxChars = $('#tts-max-chars');
   if (maxChars) maxChars.value = String(settings.max_chars || 400);
   const voice = $('#tts-voice');
@@ -2957,6 +2994,7 @@ function ttsFormValues() {
     base_url: ($('#tts-base-url')?.value || '').trim(),
     voice_id: $('#tts-voice')?.value || '',
     probability: probabilityPayload(Number($('#tts-probability')?.value || state.voiceProbability || 0)),
+    text_break_probability: probabilityPayload(Number($('#tts-break-probability')?.value || 35)),
     max_chars: Number($('#tts-max-chars')?.value || 400),
   };
 }
@@ -3323,34 +3361,6 @@ function providerForm(provider, tab) {
 function bind() {
   updateVoiceControls();
   $('#voice-toggle').addEventListener('click', () => setVoiceAlways(!state.voiceAlways));
-  $('#voice-prob').addEventListener('click', (event) => {
-    event.stopPropagation();
-    toggleVoicePopover();
-  });
-  $('#voice-prob-range').addEventListener('input', (event) => {
-    state.voiceProbability = Number(event.target.value);
-    updateVoiceControls();
-  });
-  $('#voice-prob-range').addEventListener('change', async (event) => {
-    try {
-      const settings = await client.voiceUpdateSettings({ probability: probabilityPayload(Number(event.target.value)) });
-      state.voiceSettings = settings;
-      state.voiceProbability = probabilityPercent(settings.probability);
-      updateVoiceControls();
-    } catch {}
-  });
-  $('#voice-settings-link').addEventListener('click', (event) => {
-    event.preventDefault();
-    closeVoicePopover();
-    state.modelTab = 'tts';
-    navigate('model');
-  });
-  document.addEventListener('click', (event) => {
-    if (!event.target.closest('.composer-left')) closeVoicePopover();
-  });
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeVoicePopover();
-  });
   $('#tts-save').addEventListener('click', saveTtsSettings);
   $('#tts-test').addEventListener('click', previewTts);
   $('#tts-refresh').addEventListener('click', async () => {
@@ -3360,6 +3370,10 @@ function bind() {
   });
   $('#tts-probability').addEventListener('input', (event) => {
     const value = $('#tts-probability-value');
+    if (value) value.textContent = Number(event.target.value) + '%';
+  });
+  $('#tts-break-probability').addEventListener('input', (event) => {
+    const value = $('#tts-break-probability-value');
     if (value) value.textContent = Number(event.target.value) + '%';
   });
   $('#gate-connect').addEventListener('click', async () => {
@@ -3505,6 +3519,11 @@ function bind() {
     event.preventDefault();
     const input = $('#input');
     const text = input.value.trim();
+    if (isStopCommand(text)) {
+      input.value = ''; input.style.height = '';
+      await stopGeneration();
+      return;
+    }
     if (state.busy||state.uploadingImages||(!text&&!state.pendingImages.length)) return;
     input.value = '';
     input.style.height = '';
@@ -3517,6 +3536,7 @@ function bind() {
     const node = event.target;
     node.style.height = 'auto';
     node.style.height = Math.min(node.scrollHeight, 180) + 'px';
+    $('#send').disabled = state.uploadingImages || (state.busy && !isStopCommand(node.value));
   });
   $('#stop').addEventListener('click', stopGeneration);
   $('#chat-images').addEventListener('change',event=>uploadChatImages(event.target));

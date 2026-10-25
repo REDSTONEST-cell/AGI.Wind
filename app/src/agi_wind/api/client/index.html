@@ -113,18 +113,6 @@
                       <span class="voice-switch-track" aria-hidden="true"><span class="voice-switch-knob"></span></span>
                       <span>语音</span>
                     </button>
-                    <button class="voice-prob" id="voice-prob" type="button" aria-haspopup="dialog" aria-expanded="false" title="语音触发概率">语音 30%</button>
-                    <div class="voice-popover" id="voice-popover" role="dialog" aria-label="语音触发概率" hidden>
-                      <div class="voice-popover-row">
-                        <span>语音概率</span>
-                        <output id="voice-prob-value">30%</output>
-                      </div>
-                      <input id="voice-prob-range" type="range" min="0" max="100" step="1" value="30" aria-label="语音触发概率">
-                      <div class="voice-popover-foot">
-                        <span class="meta">越高越常收到语音</span>
-                        <a class="voice-link" id="voice-settings-link" href="#/model">语音设置</a>
-                      </div>
-                    </div>
                   </div>
                   <div class="toolbar-right">
                     <button class="btn ghost small" id="stop" type="button" hidden>停止</button>
@@ -486,6 +474,7 @@
               <label class="field"><span>语音服务地址</span><input id="tts-base-url" class="input" placeholder="http://127.0.0.1:8137" autocomplete="off"></label>
               <label class="field"><span>默认音色</span><select id="tts-voice" class="select"><option value="">自动 / 默认</option></select></label>
               <label class="field"><span>语音概率</span><span class="tts-range-row"><input id="tts-probability" type="range" min="0" max="100" step="1" value="30" aria-label="语音概率"><output id="tts-probability-value">30%</output></span></label>
+              <label class="field"><span>语音段后切换文字概率</span><span class="tts-range-row"><input id="tts-break-probability" type="range" min="0" max="100" step="1" value="35" aria-label="语音段后切换文字概率"><output id="tts-break-probability-value">35%</output></span></label>
               <label class="field"><span>单段最大字数</span><input id="tts-max-chars" class="input" type="number" min="20" max="1000" step="1" value="400"></label>
               <label class="field"><span>试听情绪</span>
                 <select id="tts-emotion" class="select">
@@ -767,6 +756,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script type="module" src="/client/app.js?v=20261026e"></script>
+  <script type="module" src="/client/app.js?v=20261026f"></script>
 </body>
 </html>

@@ -84,32 +84,49 @@ export function createAgentPage(client) {
 
 function installApprovals(client) {
   const dialog = document.querySelector('#agent-approval-dialog');
-  let active = null, busy = false;
+  // Approval is global and non-modal: it must never make the rest of the UI inert.
+  document.body.append(dialog);
+  let active = null, polling = false, deciding = false, revision = 0;
   const hint = document.querySelector('#agent-approval-hint');
+  document.addEventListener('agi-agent-stopped', () => { ++revision; active = null; dialog.close(); });
+  const buttons = [document.querySelector('#agent-approval-allow'), document.querySelector('#agent-approval-deny')];
+  async function request(path, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try { return await client.request(path, { ...options, signal: controller.signal }); }
+    finally { clearTimeout(timer); }
+  }
   async function decide(allow) {
-    if (!active || busy) return;
-    busy = true;
+    if (!active || deciding) return;
+    ++revision;
+    deciding = true;
+    buttons.forEach(button => { button.disabled = true; });
     try {
-      await client.request('/api/v1/agent/approvals/' + encodeURIComponent(active.id), { method: 'POST', body: { allow } });
+      await request('/api/v1/agent/approvals/' + encodeURIComponent(active.id), { method: 'POST', body: { allow } });
       active = null; dialog.close();
-    } catch (error) { hint.textContent = error.message; }
-    finally { busy = false; }
+    } catch (error) {
+      if (error.status === 404) { active = null; dialog.close(); }
+      else hint.textContent = '请求未完成，可重试；你仍可使用其他页面。' + error.message;
+    }
+    finally { deciding = false; buttons.forEach(button => { button.disabled = false; }); }
   }
   document.querySelector('#agent-approval-allow').addEventListener('click', () => decide(true));
   document.querySelector('#agent-approval-deny').addEventListener('click', () => decide(false));
   dialog.addEventListener('cancel', event => { event.preventDefault(); decide(false); });
   setInterval(async () => {
-    if (busy || document.hidden || document.querySelector('#app').hidden) return;
-    busy = true;
+    if (polling || deciding || document.hidden || document.querySelector('#app').hidden) return;
+    polling = true;
+    const version = revision;
     try {
-      const result = await client.request('/api/v1/agent/approvals');
+      const result = await request('/api/v1/agent/approvals');
+      if (deciding || version !== revision) return;
       if (active && !result.items.some(item => item.id === active.id)) { active = null; dialog.close(); }
       if (!active && result.items.length) {
         active = result.items[0]; hint.textContent = '';
         document.querySelector('#agent-approval-details').textContent = active.operation + '\n' + JSON.stringify(active.details, null, 2);
-        dialog.showModal();
+        dialog.show();
       }
     } catch { /* A disconnected or signed-out client cannot approve operations. */ }
-    finally { busy = false; }
+    finally { polling = false; }
   }, 1500);
 }

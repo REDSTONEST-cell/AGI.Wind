@@ -3,6 +3,9 @@ from pathlib import Path
 import subprocess
 import sys
 from typing import Literal
+from uuid import uuid4
+
+from sqlalchemy import select, or_
 
 from fastapi import Depends, Request
 from pydantic import Field, SecretStr
@@ -48,6 +51,23 @@ def install_agent_routes(app, settings, store, service, authenticate):
     service.agent_secret_store = search_store
     service.agent_approvals = approvals = ApprovalQueue()
     service.agent_data_dir = settings.data_dir
+
+    @app.post('/api/v1/agent/stop')
+    async def stop_actions(current=Depends(authenticate)):
+        from ..archive import models as m
+        from ..delivery import models as d
+        with service.db.engine.connect() as conn:
+            ids = list(conn.scalars(select(m.generations.c.id).select_from(
+                m.generations.join(m.requests, m.generations.c.request_id == m.requests.c.id)
+                .join(m.conversations, m.requests.c.conversation_id == m.conversations.c.id)
+                .outerjoin(d.speech_segments, d.speech_segments.c.generation_id == m.generations.c.id)
+            ).where(m.conversations.c.account_id == current.account_id,
+                    m.conversations.c.user_id == current.user_id,
+                    or_(m.generations.c.state.in_(['pending','running','draining']), d.speech_segments.c.state.in_(['queued','synthesizing']))).distinct()))
+        for generation_id in ids:
+            await service.interrupt(current, generation_id, uuid4())
+        approvals.revoke(current)
+        return {'stopped': len(ids)}
 
     def view():
         policy = settings.agent

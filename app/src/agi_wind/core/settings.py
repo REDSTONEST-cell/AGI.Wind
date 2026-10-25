@@ -38,6 +38,9 @@ class VoiceSettings(DTO):
     voice_id: str = "yuwan"
     voice_version: str = "1"
     probability: float = Field(default=0.3, ge=0, le=1)
+    # A voice turn normally stays voice; after two voiced segments an auto-mode turn may
+    # send one text segment instead, so the rhythm reads more like a real chat partner.
+    text_break_probability: float = Field(default=0.35, ge=0, le=1)
     max_chars: int = Field(default=400, ge=20, le=1000)
     timeout_seconds: float = Field(default=180, gt=0, le=600)
 

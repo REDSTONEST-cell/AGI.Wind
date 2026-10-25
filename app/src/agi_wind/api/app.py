@@ -85,6 +85,7 @@ class VoiceSettingsPatch(DTO):
     base_url:str|None=Field(default=None,max_length=2000)
     voice_id:str|None=Field(default=None,max_length=64)
     probability:float|None=Field(default=None,ge=0,le=1)
+    text_break_probability:float|None=Field(default=None,ge=0,le=1)
     max_chars:int|None=Field(default=None,ge=20,le=1000)
 class VoicePreviewRequest(DTO):
     text:str=Field(default="哥哥，今天也辛苦啦。",max_length=200)
@@ -350,6 +351,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             "voice_id":settings.voice.voice_id,
             "voice_version":settings.voice.voice_version,
             "probability":settings.voice.probability,
+            "text_break_probability":settings.voice.text_break_probability,
             "max_chars":settings.voice.max_chars,
             "timeout_seconds":settings.voice.timeout_seconds,
             "available":bool(health.get("available")),
