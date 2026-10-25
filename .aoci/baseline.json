@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-25T01:44:09Z",
-  "updated_at": "2026-10-25T02:12:27Z",
+  "updated_at": "2026-10-25T02:24:19Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -41,9 +41,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "925b5d6dbc31a1695b29335d88181b298dc9cb30681917f255c79defd447895e",
-      "size": 8555,
-      "normalized_sha256": "925b5d6dbc31a1695b29335d88181b298dc9cb30681917f255c79defd447895e"
+      "sha256": "be364190c098263f81b6130ed1ed35f621e181844c8b59a76f6e9cd92b5380e5",
+      "size": 40049,
+      "normalized_sha256": "be364190c098263f81b6130ed1ed35f621e181844c8b59a76f6e9cd92b5380e5"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -873,9 +873,9 @@
     },
     "docs/ops/acceptance-report.md": {
       "role": "index",
-      "sha256": "d854ddaea3f3ddf202b6482f64106161cb9eac6f14f0d809bfb08dcc529b34bc",
-      "size": 3252,
-      "normalized_sha256": "cdb052ef7194c9f1d49c3ffc8039df86464739401c2ebdb47a6cd753350a23bf"
+      "sha256": "a1c9970140b441441cfeb1eac5fb6305ba088a96c326f43b51e5e64f04795dba",
+      "size": 3427,
+      "normalized_sha256": "54d20563c55843afe6b317a29656b51b2c3aaf78d998723a97b473e77da469de"
     },
     "docs/ops/environment.md": {
       "role": "index",
@@ -891,15 +891,15 @@
     },
     "docs/ops/progress.md": {
       "role": "index",
-      "sha256": "6be5705f7edbcd9e394e863e631215a03aedef9c223d28147af079994c5288f6",
-      "size": 5076,
-      "normalized_sha256": "0d9790dc7f55477a0de8b182704269f9e4dd3e34415f365e478389a43be2d078"
+      "sha256": "c9e3fbce89753487d5da96b520d3ba5b0fffb3899460f26b82a49a94a2c640f3",
+      "size": 5444,
+      "normalized_sha256": "e90254799f4f40aba6b058ec3c352eda3c2412333171c3e3c8b70d7626b5ddf7"
     },
     "docs/ops/runbook.md": {
       "role": "index",
-      "sha256": "6b3aaabfdeb1eecb2e77f1dcf2297ce453620fb86cf296ac5b6b35b01d4be1b4",
-      "size": 5442,
-      "normalized_sha256": "6b3aaabfdeb1eecb2e77f1dcf2297ce453620fb86cf296ac5b6b35b01d4be1b4"
+      "sha256": "a35b32c7b960772668c06f40d7da4514abe311f89d1a4829b11bbf6cc7a60fde",
+      "size": 5648,
+      "normalized_sha256": "a35b32c7b960772668c06f40d7da4514abe311f89d1a4829b11bbf6cc7a60fde"
     },
     "docs/ops/source-files.txt": {
       "role": "index",
