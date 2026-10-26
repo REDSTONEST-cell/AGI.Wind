@@ -300,7 +300,7 @@ class QQBridge:
                 self.last_status='generation_stopped'; return
             parts=await self._reply_parts(await self._reply_content())
             for index,part in enumerate(parts[:32]):
-                if index: await asyncio.sleep(policy.reply_delay_seconds)
+                if index: await asyncio.sleep(self._typing_delay(part,policy.reply_delay_seconds))
                 if not self.settings.qq.enabled or connection is not self.connection: return
                 await connection.call('send_private_msg',{'user_id':int(policy.owner_qq),'message':[part]})
             self.last_status='ready'
@@ -386,7 +386,7 @@ class QQBridge:
             parts=await self._reply_parts(await self._reply_content())
             bot_message_ids=[]
             for index,part in enumerate(parts[:32]):
-                if index: await asyncio.sleep(policy.reply_delay_seconds)
+                if index: await asyncio.sleep(self._typing_delay(part,policy.reply_delay_seconds))
                 if not self.settings.qq.enabled or connection is not self.connection: return
                 result=await connection.call('send_group_msg',{'group_id':int(message['group_id']),'message':[part]})
                 platform_message_id=result.get('message_id') if isinstance(result,dict) else None
@@ -423,6 +423,13 @@ class QQBridge:
     @staticmethod
     def _voice_mode(message):
         return 'always' if message.get('records') or '语音' in message.get('text','') else 'auto'
+
+    @staticmethod
+    def _typing_delay(part, base):
+        """Human-ish pause before a message: longer text takes longer to "type"."""
+        if part.get('type')!='text': return base
+        length=len(str((part.get('data') or {}).get('text') or ''))
+        return min(8.0, base + length*0.06)
 
     async def _prepare_input(self, connection, message):
         text=message.get('text','')

@@ -1,7 +1,7 @@
 import { AgiWindClient, ApiError } from './sdk/api.js?v=20261027memberpool1';
 import { appendImages, messageImages } from './media.js?v=20261027a';
 import { cropAvatar } from './avatar-crop.js?v=20261027a';
-import { splitReply } from './reply-segments.js?v=20261027a';
+import { splitReply } from './reply-segments.js?v=20261027b';
 import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027b';
 import { createAgentPage } from './agent-settings.js?v=20261027e';
 import { createRealtimeCall } from './realtime-call.js?v=20261026-call3';

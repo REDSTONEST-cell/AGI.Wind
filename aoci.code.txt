@@ -2,7 +2,7 @@
 
 ===C:/Users/wind/Desktop/AGI.Wind/===
 .gitattributes[FV5T]: F:约束文本检出换行为LF以稳定AOCI原始字节指纹 | R:- | A:- | S:覆盖本机autocrlf转换；二进制自动识别且不改写
-.gitignore[FC7T]: F:划分业务源码与私密运行数据、原有工具及本机接入配置的提交边界 | R:code:.gitattributes | A:- | S:data、局部配置、虚拟环境、模型工具与输出资产均排除；AOCI主资产仍可治理
+.gitignore[FC7T]: F:划分业务源码与私密运行数据、原有工具及本机接入配置的提交边界 | R:code:.gitattributes | A:- | S:data、局部配置、虚拟环境、模型工具与输出资产均排除；新增/app/tmp*排除并行测试与环境临时文件，避免其进入提交或影响仓库认知；AOCI主资产仍可治理。
 AGENTS.md[SC8S]: F:规定本仓AOCI认知建立、连续交付、语义作者化与最终维护规则 | R:- | A:- | S:Memory不能替代当前认知收据；正式语义必须由Host依绑定证据创作，不能模板推导
 AI伴侣框架选型评估报告.md[SA5L]: F:比较陪伴前端、记忆、语音与部署路线并论证独立原始档案核心 | R:code:Codex开发交接.md | A:- | S:属于2026-10-24调研快照；厂商能力、许可和性能推断不代表本项目已部署
 Codex开发交接.md[SW7T]: F:连接已确定需求、设计计划、资产保留和分阶段验收的开发交接入口，并标注初始方案已落地、指向当前开发记录与新功能计划 | R:code:README.md,code:docs/development/2026-10-25-development-record.md,code:docs/superpowers/plans/2026-10-25-reasoning-images-stickers-plan.md | A:- | S:初始用户约束与验收目标保留；当前实现/测试以开发记录和progress为准；本文件不是运行手册；历史内容不被覆盖。
@@ -19,7 +19,6 @@ pnpm-lock.yaml[FV4S]: F:锁定根工作区 devDependencies 的解析结果、int
 alembic.ini[FD6T]: F:配置Alembic迁移目录与Python路径解释方式 | R:code:app/migrations/env.py | A:- | S:数据库凭据不在本文件，独立迁移需AGI_DATABASE_URL或显式注入连接
 pyproject.toml[FV7T]: F:�̶�Pythonҵ���Ͳ���������agi-wind���wheel���߽� | R:code:app/uv.lock,code:app/src/agi_wind/cli.py | A:agi-wind | S:Python��3.12��FastEmbed��ģ������λ�ڶ���������live/gpu���Ǳ�����������ʵ���á�
 uv.lock[FV4L]: F:����Python3.12ҵ������������������Դ�;�ȷ�汾 | R:code:app/pyproject.toml | A:- | S:uv�������ָģ�ģ��ר�û����������档
-t123.bin[TQ1T]: F:���浥�ַ�x���ı�ռλ���� | R:- | A:- | S:-
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/migrations/===
 env.py[PD8T]: F:在当前PostgreSQL schema运行Alembic事务并连接共享模型元数据 | R:code:app/alembic.ini,code:app/src/agi_wind/archive/models.py | A:migrate | S:优先使用注入连接；版本表绑定current_schema以隔离真实测试库的临时schema
@@ -73,11 +72,11 @@ types.py[CG8S]: F:定义账号、访问场景、来源、聊天请求、记忆�
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/delivery/===
 invalidation.py[AM6T]: F:人格或记忆变更时取消在途生成、提升epoch并关闭未完成工具和广播失效事件 | R:code:app/src/agi_wind/delivery/stream.py,code:app/src/agi_wind/archive/models.py | A:invalidate_active | S:调用方须持角色锁且与memory_revision递增同事务；仅处理running/draining；不直接取消异步任务，依靠后续assert_current收敛。
 models.py[PM8T]: F:�����־������طš��Ự�¼�������ͷ�񽻸���ִ��������Ϣ�� | R:code:app/src/agi_wind/archive/models.py,code:app/migrations/versions/0011_proactive.py | A:DELIVERY_TABLES,speech_segments,proactive_messages | S:������������Ƭ������������Ψһ����ִ�������豸��proactive����0011��������������0004��DELIVERY_TABLES�С�
-service.py[AM9L]: F:编排回答生成、上下文注入、图片观察/Agent工具、分段文本、语音与群场景提示，并在群回答后排队成员池提炼 | R:code:app/src/agi_wind/agent/delivery.py,code:app/src/agi_wind/voice/service.py,code:app/src/agi_wind/memory/context.py,code:app/src/agi_wind/memory/jobs.py | A:GenerationService | S:群场景注入多人/不继承主人关系/不泄露私聊的提示，成员消息带[名字]；群回答完成同时排主人池与成员池提炼任务；锁内校验revision/epoch；text完成即draining；realtime走独立Agent循环，工具轨迹不发送到群。
+service.py[AM9L]: F:编排回答生成、上下文注入、图片观察/Agent工具、按行分段文本、语音与群场景提示，并排队主人/成员池提炼 | R:code:app/src/agi_wind/agent/delivery.py,code:app/src/agi_wind/voice/service.py,code:app/src/agi_wind/memory/context.py,code:app/src/agi_wind/memory/jobs.py,code:app/src/agi_wind/delivery/segments.py | A:GenerationService | S:群场景注入多人/不继承主人关系/不泄露私聊的提示；文本按模型换行切条，段与语音排队使用同一分段规则；群回答完成同时排主人池与成员池提炼；锁内校验revision/epoch；realtime走独立Agent循环，工具轨迹不发送到群。
 stream.py[CM8T]: F:分配并持久化生成与会话流序号、编码SSE，并在失败取消时收敛未结束工具轨迹 | R:code:app/src/agi_wind/delivery/models.py,code:app/src/agi_wind/archive/models.py | A:emit,emit_live,to_event,encode_sse,finish_open_tools | S:序号按目标max+1且事务内咨询锁串行化；结束工具须与生成终态同事务，先写tool.completed再终态事件；取消保留正文并设cancelled；SSE为id/event/data信封。
 visual_agent.py[AA8M]: F:����ͼƬ�۲졢��˼�ղغ�����ģ�»����ڷ������� | R:code:app/src/agi_wind/delivery/service.py,code:app/src/agi_wind/archive/stickers.py | A:VisualAgent | S:ֻ�����ϸ�JSON������mimic/send���⣻�۲�����epoch����ͼ�ղ�ģ�£���˼ʧ�ܱ����Ĳ������ղ�ȫ��ͼ���������úͼ���ͬ������
 proactive.py[AW8M]: F:�����С���Ĭʱ�Ρ�������ÿ�����޵����������ĵ�������Ϣ | R:code:app/src/agi_wind/archive/service.py,code:app/src/agi_wind/memory/context.py | A:ProactiveService | S:Ĭ�Ϲرգ������û��¼���ģ�Ͳ���ʾ���鵵���û����������ؽ������ڣ��ֶ�force����due���ƣ���������������˼�����ġ�
-segments.py[KU7S]: F:����ʽ���������İ����ľ�ĩ�������з�Ϊ�ȶ�չʾ������Ƭ�� | R:code:app/src/agi_wind/api/client/reply-segments.js | A:split_reply,ReplySegmenter | S:����������̾�š�Ӣ�ľ��㼰����URL����ĩȥ���㵫���ձ����ţ���β�����ӳ�һ���Է����ŷ��룻���޸Ĺ鵵ԭ�ġ�
+segments.py[KU7S]: F:把模型回复按自身换行切成多条聊天消息，并在流式过程中增量交付已完成行 | R:code:app/src/agi_wind/api/client/reply-segments.js,code:app/src/agi_wind/delivery/service.py | A:split_reply,ReplySegmenter | S:每条换行一条消息，行末只去。！？.!?…；围栏与行内代码内不切分；流式按已处理行数增量交付，尾部未完成行可见；仅显示投影，不改原文；客户端fallback须一致。
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/identity/===
 models.py[PD7T]: F:定义人格版本、关系、承诺与运行时绑定四张 PostgreSQL 表结构及唯一约束，供身份快照、导出与恢复复用 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/identity/service.py,code:app/src/agi_wind/archive/repository.py,code:app/src/agi_wind/archive/exports.py | A:persona_versions,relationships,commitments,runtime_bindings,IDENTITY_TABLES | S:四表共用 archive.metadata；唯一键含 persona_versions(companion_id,version) 与 runtime_bindings(companion_id,runtime)；新增表须同步 exports.ARCHIVE_TABLE_ORDER；runtime_bindings 不参与导出恢复
@@ -162,7 +161,7 @@ status-local.ps1[OO5T]: F:��ȡ���ش������������
 stop-local.ps1[OR8S]: F:�ܹܹ�ͣGateway����ѡ��ֹͣ����ASR����HTTPS�����ݿ� | R:code:scripts/start-local.ps1,code:scripts/stop-memory-worker.ps1 | A:StopDatabase,KeepVoice | S:�ȼ�Ȩ��ͣ��15������ǿ������֤��Ŀ���̣�KeepVoice����ȫ����Χ������ȷ�������˳����ſ�ͣ�⡣
 smoke-client.py[TN6S]: F:����������Gateway���������Ự����Ȩ��̬��Դ���������ỰAPI | R:code:app/src/agi_wind/api/app.py | A:main | S:����ʱ����������������������ʵģ�Ϳ��ܼƷ�д�룻��δ����ģ��Ԥ�ڲ��ʺ�ֱ�ӵ�����ȫ�̱�׼��
 verify-visual-client.mjs[TU7S]: F:用无头Chromium回归图片分条、库页重复卡片、消息出现动画、头像裁剪、日志与输入区优先交互 | R:code:app/src/agi_wind/api/client/app.js,code:app/src/agi_wind/api/client/reply-segments.js | A:- | S:写请求由CDP/fetch模拟；三档40条历史且日志开启仍命中输入/选图/发送；检分条正文、独立图片、断线保文、头像像素；离开再进库页仅1卡；实时气泡animate-in且时长≥0.2s；零JS异常。
-test-reply-segments.mjs[TU6T]: F:用Node原生测试验证回复分段、标点清理及流式尾段规则 | R:code:app/src/agi_wind/api/client/reply-segments.js | A:- | S:直接加载生产模块原文为ESM，避免根包类型影响；手写期望覆盖句首问叹号、文件名/编号、小数、URL和代码；无浏览器或厂商依赖。
+test-reply-segments.mjs[TU6T]: F:用Node原生测试验证按行分段、标点清理、代码块保护及流式尾段规则 | R:code:app/src/agi_wind/api/client/reply-segments.js | A:- | S:直接加载生产ESM原文；期望覆盖每行一条消息、行末去句末标点、围栏/行内代码内换行不切、未完成尾段保留；无浏览器或厂商依赖。
 verify-memory-client.mjs[TU7S]: F:用无头Chromium加mock记忆API回归记忆页的指标/分布/设置、列表、详情、纠正、隐藏、立即提炼、召回测试、维护与重要度 | R:code:app/src/agi_wind/api/client/app.js,code:app/src/agi_wind/api/client/index.html | A:- | S:仅mock记忆接口，不改真实对话；验证指标/分布/设置保存/召回/维护/标重要与0 JS异常；截图memory-client-*.png；不证明真实提炼质量或真实业务数据。
 accept-agent-command.py[TQ6S]: F:����ʵGateway��ģ����֤����ߵ���׼���ܾ����� | R:code:app/src/agi_wind/agent/commands.py | A:main | S:��������ʵ����ģ�Ͳ��Զ���׼�ϳ�echo����ʱ�رռ��䡢����������ɾ�����ԻỰ��finally�ָ�Ȩ��ģʽ����Ի���
 accept-agent-files.py[TQ6S]: F:����ʵGatewayģ�ͺ��ļ�ϵͳ��֤��Ŀ¼���ߵ���׼���ܾ� | R:code:app/src/agi_wind/agent/files.py | A:main | S:��ʵģ�ͻ���������Ŀ¼�������ű��Զ�����������������ʱ�رռ��䲢ɾ�����ԻỰ���Ǵ�ֻ��ð�̡�
@@ -202,18 +201,18 @@ verify-usage-ui.mjs[TU5S]: F:����ʵ������ȡ��ָ֤�ꡢ�
 verify-voice-client.mjs[TU6S]: F:�����������ء����ʸ��㡢��ɫ���ü���ѡ�ϳ���ʷ��Ƶ��Ƭ | R:code:app/src/agi_wind/api/client/audio.js | A:- | S:�����������򱣴���ʵ���ʣ�Ҫ���Ѳ���yuwan������TTS��ҳ��ͨ���������˶�����������ѵ�����ɡ�
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/api/client/===
-app.js[AU8L]: F:编排聊天、档案人格、记忆抽屉、双记忆池筛选、QQ连接/群窗口、模型Agent页面和通话日志 | R:code:app/src/agi_wind/api/client/qq-settings.js,code:app/src/agi_wind/api/client/sdk/api.js,code:app/src/agi_wind/api/client/realtime-call.js | A:loadMemoryPage,openMemoryDrawer,renderGroupWindows,switchChatWindow,stopGeneration | S:群窗口只读且只显示本群历史；记忆页可按主人/成员池与来源群筛选，成员条目显示名片与群名；主“对话”入口回私人窗口；换页关闭抽屉；思考只入日志，Stop可抢占忙状态。
-index.html[EU8L]: F:声明聊天与档案管理页面、记忆抽屉、双记忆池/来源群筛选、QQ连接/群聊表单、群窗口列表、审批和实时通话控件 | R:code:app/src/agi_wind/api/client/app.js,code:app/src/agi_wind/api/client/qq-settings.js | A:memory-pool,memory-room,qq-settings-form,group-window-list,agent-approval-dialog,call-panel | S:ID/data-page/hidden是脚本契约；记忆池/来源群下拉由脚本填充，主人池时隐藏群筛选；令牌不回填；群窗口列表缺省隐藏；模块缓存版本须一致。
-styles.css[CU6L]: F:定义明暗主题、响应式聊天、日志、记忆设置抽屉与QQ群窗口的视觉布局 | R:code:app/src/agi_wind/api/client/index.html | A:- | S:记忆抽屉81高于遮罩80；群窗口提示用虚线卡片、群列表复用nav-item；背景用surface主题变量，窄屏全宽。
+app.js[AU8L]: F:编排聊天、档案人格、记忆抽屉与双池筛选、QQ连接/群窗口、打开群窗口、模型Agent页面和通话日志 | R:code:app/src/agi_wind/api/client/qq-settings.js,code:app/src/agi_wind/api/client/sdk/api.js,code:app/src/agi_wind/api/client/reply-segments.js | A:loadMemoryPage,openMemoryDrawer,renderGroupWindows,switchChatWindow,stopGeneration | S:连接页打开群窗口复用switchChatWindow并加载该群历史；群窗口只读，主“对话”入口回私人；记忆页可按主人/成员池与来源群筛选；回复显示分段与服务端逐行规则一致并保留旧档案回退；换页关闭抽屉；思考只入日志。
+index.html[EU8L]: F:声明聊天与档案管理、记忆双池/来源群筛选、QQ连接/群聊表单、已接入群窗口列表、审批和实时通话控件 | R:code:app/src/agi_wind/api/client/app.js,code:app/src/agi_wind/api/client/qq-settings.js | A:memory-pool,memory-room,qq-group-windows,qq-settings-form,group-window-list,agent-approval-dialog | S:ID/data-page/hidden是脚本契约；群窗口列表由连接页脚本填充；令牌不回填；记忆池为owner时隐藏来源群筛选；群窗口缺省隐藏；模块缓存版本须一致。
+styles.css[CU6L]: F:定义主题、响应式聊天、日志、记忆设置抽屉、QQ群窗口与逐群启停列表的视觉布局 | R:code:app/src/agi_wind/api/client/index.html | A:- | S:记忆抽屉81高于遮罩80；群窗口提示用虚线卡片、群列表复用nav-item、逐群启停行独立qq-group-row；背景用surface主题变量，窄屏全宽。
 avatar-crop.js[KU6T]: F:提供双方头像共享的本地正方形裁剪窗口与拖动缩放交互 | R:code:app/src/agi_wind/api/client/app.js | A:cropAvatar | S:取消返回null且不上传；确认输出512×512 PNG；平移限制避免空白；关闭释放ImageBitmap及按键监听。
 media.js[LU6T]: F:渲染授权图片附件及支持键盘关闭的图片灯箱 | R:code:app/src/agi_wind/api/client/sdk/api.js,code:app/src/agi_wind/api/client/app.js | A:showImage,appendImages,messageImages | S:图片按asset_id去重并经授权URL加载；附件接在正文之后；灯箱关闭恢复原焦点；本模块不再创建思考或工具轨迹节点。
-reply-segments.js[KU7T]: F:把完整或流式回复投影为带完成状态的句子段落并清理句末分隔标点 | R:code:app/src/agi_wind/api/client/app.js | A:splitReply | S:按。！？!?与换行分段，保留句首问叹号；逗号顿号和英文句点不分段；围栏/行内代码及URL内部标点受保护；末尾未完成段保持可见；仅显示投影，不改原文。
+reply-segments.js[KU7T]: F:在浏览器把完整或流式回复按模型自身换行投影为带完成状态的消息段并去掉行末分隔标点 | R:code:app/src/agi_wind/api/client/app.js,code:app/src/agi_wind/delivery/segments.py | A:splitReply | S:每条换行一条消息；围栏与行内代码内不切分；行末只去。！？.!?…；保留句首问叹号；仅用于显示，旧档案回退与服务端split_reply规则一致；不改归档原文。
 agent-settings.js[AU7S]: F:����Agent���ء��������á��ļ�����Ȩ�޺�ȫ���������� | R:code:app/src/agi_wind/agent/api.py | A:createAgentPage | S:�����Ի�����ģ̬��ȫ�ֹ��أ���ѯ5�볬ʱ��ֹͣ�¼�������ǰ��ʾ����Կ����localStorage������Ա������UAC��
 audio.js[LU7M]: F:��Ⱦ�����������ݡ��ϳ�״̬�͵�ʵ����Ƶ���Ž��� | R:code:app/src/agi_wind/api/client/sdk/api.js | A:createAudioMessage,stopAllAudio | S:��Ȩ��������Ϊ����URL������ʱ�ͷţ�������ֹ�ٵ����ظ��ǵ�ǰ���������Զ����ű��������ܾ�ʱ��ʾ�������š�
 call-audio.js[KP6T]: F:�ṩͨ���̾��з֡���ʽPCM16���뼰��Ƶ�������� | R:code:app/src/agi_wind/api/client/realtime-call.js | A:SpeechChunks,PcmDecoder,PcmPlayer | S:���������ֽ�β������ƴ�ӣ��׾���ֵ20�֡�����40�֣�stop�������ų���Դ�����ý��롣
 call-capture.js[IH6T]: F:��AudioWorklet���������˷�������֡����ͨ�������� | R:code:app/src/agi_wind/api/client/realtime-call.js | A:agi-call-capture | S:�������÷�����16kHz AudioContext��ÿ640��float32����ת��һ��buffer����ǰβ֡�����롣
 realtime-call.js[AU8M]: F:�������˷���Ȩ��ͨ��WebSocket��תд�����켰�־���ʽ�����͹Ҷ� | R:code:app/src/agi_wind/api/client/call-audio.js,code:app/src/agi_wind/api/client/call-capture.js | A:createRealtimeCall | S:�谲ȫ��������16kHz����ǰ˵��ʱ��ͣ�ϴ����޲廰��session/epoch�����ٵ���Ƶ������������δ����realtimeѡ�
-qq-settings.js[AU7T]: F:读取保存主人QQ私聊与群聊设置，展示连接状态、允许群列表与接话参数 | R:code:app/src/agi_wind/integrations/qq.py,code:app/src/agi_wind/integrations/qq_groups.py | A:createQQPage | S:群聊只在QQ已启用时保存；允许群号去重后提交；令牌留空保留、保存即清空；状态刷新不覆盖正在编辑的字段；不把令牌存浏览器。
+qq-settings.js[AU7T]: F:读取保存QQ私聊/群聊设置，展示连接状态与已接入群窗口，并支持逐群启停和打开窗口 | R:code:app/src/agi_wind/integrations/qq.py,code:app/src/agi_wind/integrations/qq_groups.py | A:createQQPage | S:群列表来自/qq/groups，开关PATCH后刷新状态与列表；群聊保存需QQ已启用；允许群号去重后提交；令牌留空保留、保存即清空；状态刷新不覆盖正在编辑的字段；不把令牌存浏览器。
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/api/client/sdk/===
 api.js[LN8L]: F:提供带授权、JSON API、受权媒体、SSE与记忆双池筛选的前端SDK | R:code:app/src/agi_wind/api/app.py | A:AgiWindClient,ApiError,memoryItems,qqGroups | S:Bearer或cookie；cookie写需CSRF；SSE用fetch支持鉴权；memoryItems支持pool/room_id/subject_principal_id；qqGroups读取持久群窗口；密钥只在实例内存；跨域地址建缓存。
@@ -229,13 +228,13 @@ api.js[LN8L]: F:提供带授权、JSON API、受权媒体、SSE与记忆双池�
 2026-10-26-memory-completion.md[SW8T]: F:��¼�������������Ľӿڡ�ģ�͡�Ǩ�ơ����𡢱�����ʵ�����ձ߽� | R:code:app/src/agi_wind/memory/semantic.py,code:docs/ops/acceptance-report.md | A:- | S:����96ͨ��1������ȫ������call_id����ʧ�ܣ�ժҪ��32��Դ�ҷ��ù��㣻��ɫ���α��Ƕ��û��αꣻAOCI״̬�������¼���Ϊ׼��
 2026-10-26-voice-model-f16depth.md[SP6T]: F:��¼BreezeԭȨ��ת��������F16�������������ܶ��պͻع� | R:code:config/voice.example.json | A:- | S:��Ƶ�������������������ۣ�F16depth��RTF0.97����С���������л�ԭQ8��Ȩ��������ʱ���ڲֿ��⡣
 2026-10-26-qq-onebot.md[SW7T]: F:记录QQ私聊适配、部署、验证证据与实际使用边界 | R:code:app/src/agi_wind/integrations/qq.py | A:- | S:27项为合成提供商与模拟协议验证，无付费模型和真实联系人消息测试；复用桌面已登录SnowLuma；不支持群聊与QQ语音，生成完成后分条发送。
-2026-10-26-qq-groups.md[SW7T]: F:记录QQ群聊两批实现（窗口/身份/接话/双池/成员池）、离线证据与未完成边界 | R:code:docs/ops/progress.md,code:app/src/agi_wind/integrations/qq_groups.py,code:app/src/agi_wind/memory/access.py,code:app/src/agi_wind/memory/members.py | A:- | S:明确真实QQ群收发未验收、真实模型成员记忆未验收、接话线程仅内存、逐群启停与成员级停止未做；351 passed/1既有call_id失败；不宣称功能全部完成。
+2026-10-26-qq-groups.md[SW7T]: F:记录QQ群聊三批实现（窗口/身份/接话/双池/成员池/群内权限/逐群启停）、离线证据与未完成边界 | R:code:docs/ops/progress.md,code:app/src/agi_wind/integrations/qq_groups.py,code:app/src/agi_wind/memory/access.py,code:app/src/agi_wind/memory/members.py,code:app/src/agi_wind/agent/delivery.py | A:- | S:真实QQ群收发与真实媒体/模型成员记忆未验收；接话线程仅内存；成员级停止、群内审批、每群费用上限未做；记录359 passed/1既有call_id失败；不宣称功能全部完成。
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/agent/===
 __init__.py[CE3T]: F:�������ް��¹��߰�������Ȩ���߽� | R:- | A:- | S:-
 api.py[ES8S]: F:提供Agent设置、审批、全局停止和Windows管理员重启接口 | R:code:app/src/agi_wind/agent/permissions.py,code:app/src/agi_wind/agent/settings.py | A:install_agent_routes | S:全局Stop先取消QQ交付再中断生成并撤销审批；设置只回显密钥状态；管理员重启须回环来源和回环绑定，仍由Windows UAC确认。
 commands.py[IS8S]: F:�ṩ����������������Ŀ¼����ʱԼ��������ִ�й��� | R:code:app/src/agi_wind/agent/permissions.py,code:app/src/agi_wind/agent/runner.py | A:CommandTools | S:Ĭ�Ϲرգ��������û�Ȩ�����ж���OSɳ�䣻������communicate���ضϣ�����Э��ȡ������֤�߳��н�������������
-delivery.py[AM8T]: F:������ѭ���������ɰ汾���顢˼���켣�����񻯱��������� | R:code:app/src/agi_wind/agent/runner.py,code:app/src/agi_wind/delivery/service.py | A:run_agent | S:ÿ�ι���ǰ��У��epoch�ͼ����汾������/�ļ����ļ���������ֻ����ʱ������ʷ���־ù켣����ժҪ�����ݡ�
+delivery.py[AM8T]: F:运行受限Agent工具循环，按场景生成权限策略与工具清单，并处理生成版本校验、工具轨迹归档和贴纸发送 | R:code:app/src/agi_wind/agent/runner.py,code:app/src/agi_wind/delivery/service.py,code:app/src/agi_wind/agent/tools.py | A:agent_execution_policy,run_agent | S:群场景强制文件/命令disabled且不注册本地工具，不因主人全局full而获权；每轮工具前校验epoch和版本；文件/命令/记忆原文只留临时结果，持久轨迹留摘要/来源ID；贴纸只允许本轮结果且每轮一次。
 files.py[IS8S]: F:�ṩ����ǰ�û�Ȩ����Ŀ¼����дUTF8�빫�����ص��������� | R:code:app/src/agi_wind/agent/permissions.py,code:app/src/agi_wind/agent/runner.py | A:FileTools | S:����·������ר��Ŀ¼������ɳ�䣻������ƥ��SHA�����ݣ�����ֻ�����ļ�������ת�ͷǹ�����ַ������10MiB��
 permissions.py[MS8T]: F:管理账号用户绑定的临时审批及Windows管理员身份探测 | R:code:app/src/agi_wind/agent/api.py,code:app/src/agi_wind/integrations/qq.py | A:ApprovalQueue,is_administrator | S:审批仅内存，最多16条，默认120秒；revoke可限定generation_id，省略时保留账号或全局撤销；过期或他人审批不能处理。
 runner.py[AW8S]: F:ִ���ϸ���������ѭ�����������������ô�������ʱ���ͽ������� | R:code:app/src/agi_wind/providers/protocol.py | A:ToolSpec,AgentRunner,bounded_json | S:�����ڵ�����ִ�м�ʱ�⡢�ܼ�ʱ�ڣ�ͬ��������������ʱreasoning_content���ﵽ����ǿ��tool_choice=none��
@@ -265,6 +264,6 @@ translate_app.py[XL3T]: F:�����滻Breeze����ҳ����Ӣ�
 
 ===C:/Users/wind/Desktop/AGI.Wind/app/src/agi_wind/integrations/===
 __init__.py[CE3T]: F:声明外部消息适配包并保持档案服务为权威核心 | R:- | A:- | S:-
-qq.py[IN8M]: F:提供主人私聊与群聊的OneBot反向连接、配置鉴权、去重、媒体、分段与群窗口/回执/成员记忆排队 | R:code:app/src/agi_wind/integrations/qq_groups.py,code:app/src/agi_wind/integrations/qq_attention.py,code:app/src/agi_wind/delivery/service.py,code:app/src/agi_wind/memory/jobs.py | A:QQSettings,QQConnection,QQBridge,private_message,groups | S:默认关闭且只连固定bot；私聊仅owner；群聊需group_enabled且群号白名单；观察消息归档后按60秒合并排成员池任务；/groups只读列出持久窗口；准入与设置共锁；群内成员级停止/审批未实现；思考/工具轨迹不发送到QQ。
+qq.py[IN8M]: F:提供主人私聊与群聊OneBot连接、鉴权、去重、媒体、分段发送、群窗口/回执、成员记忆排队与逐群启停 | R:code:app/src/agi_wind/integrations/qq_groups.py,code:app/src/agi_wind/integrations/qq_attention.py,code:app/src/agi_wind/delivery/service.py,code:app/src/agi_wind/memory/jobs.py | A:QQSettings,QQBridge,private_message,QQGroupToggle,groups,toggle_group | S:默认关闭且只连固定bot；私聊仅owner；群聊需group_enabled且群号白名单；PATCH逐群改allowed_groups并同步binding；观察消息60秒合并排成员池；分段发送按文字长度增加0.06秒/字、上限8秒且非文本不额外延时；群成员级停止/审批未实现。
 qq_attention.py[IA7S]: F:规则优先判定群消息是否需回复：@、命中本地回执的引用、机器人成功回复后的短时明确追问，其余保持观察 | R:code:app/src/agi_wind/integrations/qq_groups.py,code:app/src/agi_wind/integrations/qq.py | A:GroupAttention,ReplyDecision | S:每群单线程；窗口默认90秒/最多4轮；引用只有命中receipt才算引用机器人；@别人、匿名、未知发送者、无追问词与过期都不触发模型；线程仅进程内存，重启回到观察。
 qq_groups.py[II8S]: F:标准化OneBot群事件，维护群与主人的持久窗口绑定、成员稳定身份、群白名单及群发送回执 | R:code:app/src/agi_wind/archive/models.py,code:app/src/agi_wind/identity/service.py,code:app/src/agi_wind/integrations/qq_attention.py | A:group_message,group_allowed,ensure_principal,ensure_group_binding,receipt_exists,save_send_receipt | S:绑定唯一键(account,companion,platform,bot,kind,群号)防并发双窗口；成员以(platform,external_user_id)去重，改名/群名片不新建身份；owner只取本机配置精确匹配，sender.role不授权；窗口创建不归档其他会话；群消息ID幂等。
