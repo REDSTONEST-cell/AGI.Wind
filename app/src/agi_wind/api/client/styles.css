@@ -1223,7 +1223,7 @@ body.memory-drawer-open { overflow: hidden; }
 .group-window-item { gap: 9px; }
 .group-window-badge { display: inline-grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; border-radius: 7px; background: var(--accent-soft, color-mix(in srgb, var(--accent) 16%, transparent)); color: var(--accent); font-size: 11px; font-weight: 600; }
 .group-window-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.group-window-hint { display: flex; flex-direction: column; gap: 6px; max-width: 620px; margin: 28px auto; padding: 18px 20px; border: 1px dashed var(--line); border-radius: 14px; background: var(--surface); color: var(--text-2); }
+.group-window-hint { display: flex; flex: none; flex-direction: column; gap: 4px; margin: 10px 12px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); color: var(--text-2); }
 .group-window-hint[hidden] { display: none; }
 .group-window-hint strong { color: var(--text); font-size: 14px; }
 .group-window-hint p { margin: 0; font-size: 13px; line-height: 1.7; }

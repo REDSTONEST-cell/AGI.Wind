@@ -42,7 +42,7 @@ def test_qq_real_websocket_roundtrip_uses_archive_segments_and_deduplicates(db,a
         async def stream(self,*args):
             self.calls+=1
             yield ProviderChunk(kind='reasoning',text='synthetic-private-reasoning')
-            yield '你好。今天怎么样？'
+            yield '你好。\n今天怎么样？'
     provider=Provider()
     app=client_app(db,actor,tmp_path,provider)
     app.state.service.memory_extraction_enabled=False

@@ -17,7 +17,7 @@ GROUP = "123456789"
 
 
 class Provider:
-    def __init__(self, text="你好。今天怎么样？"):
+    def __init__(self, text="你好。\n今天怎么样？"):
         self.calls = 0
         self.text = text
 
@@ -129,7 +129,7 @@ async def test_group_follow_up_without_mention_but_not_after_expiry(db, actor, s
 
 
 async def test_quote_of_bot_second_segment_is_a_strong_signal(db, actor, seeded_scope, tmp_path):
-    provider = Provider("第一段。第二段？")
+    provider = Provider("第一段。\n第二段？")
     app = client_app(db, actor, tmp_path, provider)
     app.state.service.memory_extraction_enabled = False
     app.state.settings.memory_extraction_enabled = False

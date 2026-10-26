@@ -18,7 +18,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/client/styles.css?v=20261027d">
+  <link rel="stylesheet" href="/client/styles.css?v=20261027group-layout1">
 </head>
 <body>
   <!-- 线性图标集：统一 24px 网格、1.75 描边 -->
@@ -150,16 +150,17 @@
             </div>
           </header>
 
+          <div class="group-window-hint" id="group-window-hint" hidden>
+            <strong>QQ 群窗口 · 只读</strong>
+            <p>本群成员共用这条时间线。在 QQ 里聊天，这里同步显示；私人对话和其他群各自独立。</p>
+          </div>
+
           <div class="chat-stage">
             <div class="messages" id="messages" role="log" aria-live="polite"></div>
             <div class="chat-empty" id="chat-empty">
               <div class="avatar empty-avatar" id="empty-avatar">W</div>
               <h2 id="empty-title">开始一段新的对话</h2>
               <p>这里永远只有你和她的同一段对话。旧对话可以在「对话归档」中只读回看。</p>
-            </div>
-            <div class="group-window-hint" id="group-window-hint" hidden>
-              <strong>QQ 群窗口</strong>
-              <p>同一群的所有成员共用这条时间线。群消息由鱼丸在 QQ 里收发；网页只用于查看，不会把私人对话或其他群混进来。</p>
             </div>
           </div>
 
