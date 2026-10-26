@@ -99,3 +99,38 @@ async def test_session_expires_and_launch_requires_bearer(db,actor,seeded_scope,
         # Expire through injected clock, not a sleep or fake authentication response.
         app.state.browser_sessions.clock=lambda:10**15
         assert (await client.get('/api/v1/companions')).status_code==401
+
+
+async def test_conversation_rename_requires_csrf_and_updates_title(db,actor,seeded_scope,tmp_path):
+    app=client_app(db,actor,tmp_path)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test") as client:
+        assert (await client.patch('/api/v1/conversations/'+str(seeded_scope.conversation_id),json={'title':'x'})).status_code==401
+        _,csrf=await connect(client)
+        headers={'Origin':'http://test','X-AGI-CSRF':csrf}
+        assert (await client.patch('/api/v1/conversations/'+str(seeded_scope.conversation_id),json={'title':'x'})).status_code==403
+        renamed=await client.patch('/api/v1/conversations/'+str(seeded_scope.conversation_id),json={'title':'和海边的下午'},headers=headers)
+        assert renamed.status_code==200 and renamed.json()['title']=='和海边的下午'
+        listed=(await client.get('/api/v1/conversations',params={'companion_id':str(seeded_scope.companion_id)})).json()
+        assert any(row['id']==str(seeded_scope.conversation_id) and row['title']=='和海边的下午' for row in listed)
+
+
+async def test_loopback_bootstrap_creates_session_without_token(db,actor,seeded_scope,tmp_path):
+    app=client_app(db,actor,tmp_path)
+    transport=httpx.ASGITransport(app=app,client=("127.0.0.1",50000))
+    async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
+        result=await client.post('/api/v1/client/bootstrap',headers={'Host':'127.0.0.1:18440'})
+        assert result.status_code==200,result.text
+        assert 'httponly' in result.headers['set-cookie'].lower()
+        assert result.json()['csrf_token']
+        # The new cookie immediately authorizes normal API calls.
+        assert (await client.get('/api/v1/companions')).status_code==200
+        again=await client.post('/api/v1/client/bootstrap',headers={'Host':'127.0.0.1:18440'})
+        assert again.status_code==200
+
+
+async def test_non_loopback_bootstrap_still_requires_token(db,actor,seeded_scope,tmp_path):
+    app=client_app(db,actor,tmp_path)
+    transport=httpx.ASGITransport(app=app,client=("203.0.113.9",51000))
+    async with httpx.AsyncClient(transport=transport,base_url="http://test") as client:
+        result=await client.post('/api/v1/client/bootstrap',headers={'Host':'127.0.0.1:18440'})
+        assert result.status_code==401 and 'set-cookie' not in result.headers

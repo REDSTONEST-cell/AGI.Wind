@@ -11,6 +11,25 @@ def image():
     return stream.getvalue()
 
 
+def jpeg_image():
+    stream = BytesIO()
+    Image.new("RGB", (8, 8), "red").save(stream, "JPEG")
+    return stream.getvalue()
+
+
+async def test_mislabeled_extension_is_stored_as_its_decoded_format(db, actor, seeded_scope, tmp_path):
+    """Drag-and-drop temp files often hold JPEG/WebP bytes under a .png name."""
+    from agi_wind.archive.assets import AssetStore
+    store = AssetStore(db, tmp_path)
+    asset = await store.put(actor, BytesIO(jpeg_image()), "image/png", original_filename="TempDragFile(1).png")
+    assert asset["mime"] == "image/jpeg"
+    assert asset["relative_path"].endswith(".jpg")
+    assert asset["metadata"]["original_filename"] == "TempDragFile(1).png"
+    stored, path = store.get(actor, asset["id"])
+    with Image.open(path) as opened:
+        assert opened.format == "JPEG"
+
+
 async def test_asset_dedup_does_not_grant_cross_account_access(db, actor, seeded_scope, tmp_path):
     from agi_wind.archive.assets import AssetStore
     from agi_wind.core.types import Actor

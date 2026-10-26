@@ -17,7 +17,7 @@ from .deletions import deletion_tombstones
 from .provenance import archive_origins
 from ..core.errors import AppError
 
-ARCHIVE_TABLE_ORDER=["accounts","users","companions","conversations","requests","generations","events","assets","asset_owners","asset_refs","persona_versions","relationships","commitments","memory_items","source_refs","memory_relations","outbox","jobs","speech_segments","avatar_cues","playback_receipts","deletion_tombstones","quarantine","archive_origins"]
+ARCHIVE_TABLE_ORDER=["accounts","users","external_principals","companions","conversations","channel_bindings","requests","generations","events","qq_message_receipts","assets","asset_owners","asset_refs","stickers","persona_versions","relationships","commitments","memory_items","source_refs","memory_relations","outbox","jobs","speech_segments","avatar_cues","playback_receipts","deletion_tombstones","quarantine","archive_origins"]
 
 def json_bytes(value): return (json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(",",":"),default=str)+"\n").encode()
 
@@ -32,18 +32,23 @@ class ExportService:
             return result[name]
         take("accounts",m.accounts.c.id==actor.account_id)
         take("users",m.users.c.account_id==actor.account_id)
+        take("external_principals",m.external_principals.c.account_id==actor.account_id)
         take("companions",m.companions.c.id==companion_id)
         conversations=take("conversations",m.conversations.c.companion_id==companion_id)
         conversation_ids=[row["id"] for row in conversations]
+        bindings=take("channel_bindings",m.channel_bindings.c.companion_id==companion_id)
+        binding_ids=[row["id"] for row in bindings]
         requests=take("requests",m.requests.c.conversation_id.in_(conversation_ids))
         generations=take("generations",m.generations.c.request_id.in_([row["id"] for row in requests]))
         generation_ids=[row["id"] for row in generations]
         events=take("events",m.events.c.companion_id==companion_id)
         event_ids=[row["id"] for row in events]
+        take("qq_message_receipts",m.qq_message_receipts.c.binding_id.in_(binding_ids))
         owned=list(conn.scalars(select(m.asset_owners.c.asset_id).where(m.asset_owners.c.account_id==actor.account_id)))
         take("assets",m.assets.c.id.in_(owned))
         take("asset_owners",m.asset_owners.c.account_id==actor.account_id)
         take("asset_refs",m.asset_refs.c.event_id.in_(event_ids))
+        take("stickers",m.stickers.c.companion_id==companion_id)
         take("persona_versions",im.persona_versions.c.companion_id==companion_id)
         take("relationships",im.relationships.c.companion_id==companion_id)
         take("commitments",im.commitments.c.companion_id==companion_id)
@@ -77,7 +82,7 @@ class ExportService:
                 # Every source write uses the companion lock; keep it through immutable asset copy.
                 lock(conn,companion_id)
                 data=self.snapshot(conn,actor,companion_id)
-                manifest={"archive_format_version":1,"schema_version":"0006_restore_origins","export_id":str(uuid4()),"scope":{"account_id":str(actor.account_id),"companion_id":str(companion_id)},"created_at":datetime.now(timezone.utc).isoformat(),"consistent_cut":"companion-write-barrier","files":{},"runtime_private_state_required":False,"indexes_included":False,"voice_training_material":"not_configured","secrets_included":False}
+                manifest={"archive_format_version":4,"schema_version":"0014_qq_channels","export_id":str(uuid4()),"scope":{"account_id":str(actor.account_id),"companion_id":str(companion_id)},"created_at":datetime.now(timezone.utc).isoformat(),"consistent_cut":"companion-write-barrier","files":{},"runtime_private_state_required":False,"indexes_included":False,"voice_training_material":"not_configured","secrets_included":False}
                 with zipfile.ZipFile(staged,"w",compression=zipfile.ZIP_DEFLATED) as z:
                     for name in ARCHIVE_TABLE_ORDER:
                         rows=data.get(name,[])

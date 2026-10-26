@@ -1,6 +1,8 @@
 # AGI.Wind 开发交接
 
-日期：2026-10-25。本文给接手开发的 Codex；当前交付是开发方案，尚未安装本项目服务。
+> **状态更新（2026-10-25）**：初始方案已部分落地，当前是 Windows 本地可运行基础版，不再是“尚未安装”的方案阶段。接手请先读 [开发记录](docs/development/2026-10-25-development-record.md) 与 [思维链/图片/表情包开发计划](docs/superpowers/plans/2026-10-25-reasoning-images-stickers-plan.md)，再回到本文的用户约束与最终验收目标。当前进度以 [实施进度](docs/ops/progress.md) 为准。
+
+日期：2026-10-25。本文最初写给接手开发的 Codex；历史方案内容保留，当前实现与运行状态见上方开发记录。
 
 ## 阅读顺序
 

@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import Table, Column, Text, Integer, select, or_, delete
 from sqlalchemy.dialects.postgresql import insert
 from . import models as m
-from .repository import lock, digest
+from .repository import lock, digest, authorized_conversation
 from ..memory import models as mm
 from ..identity import models as im
 from ..identity.service import authorize
@@ -120,6 +120,33 @@ class DeletionService:
         self.collect_garbage()
         return {"deletion_id":intent["deletion_id"],"ledger_synced":intent["ledger_synced"],"external_copies":"invalidated_pending_physical_purge"}
 
+    async def delete_conversation(self,actor,conversation_id):
+        with self.db.engine.begin() as conn:
+            conversation=authorized_conversation(conn,actor,conversation_id)
+            companion_id=conversation["companion_id"]
+            lock(conn,companion_id)
+            generation_ids=list(conn.scalars(select(m.generations.c.id).join(m.requests,m.generations.c.request_id==m.requests.c.id).where(m.requests.c.conversation_id==conversation_id)))
+            if conn.execute(select(m.generations.c.id).where(m.generations.c.id.in_(generation_ids),m.generations.c.state.in_(["pending","running","draining"]))).first():
+                raise AppError("GENERATION_IN_PROGRESS","这段对话仍在生成，请先停止或等待完成",409)
+            event_ids=list(conn.scalars(select(m.events.c.id).where(m.events.c.conversation_id==conversation_id)))
+            intent=None
+            if event_ids:
+                intent=self.ledger.append({"account_id":str(actor.account_id),"companion_id":str(companion_id),"target_type":"event","target_ids":[str(key) for key in event_ids],"policy":"permanent"})
+                self.apply(conn,intent)
+            conn.execute(dm.playback_receipts.delete().where(dm.playback_receipts.c.generation_id.in_(generation_ids)))
+            conn.execute(dm.avatar_cues.delete().where(dm.avatar_cues.c.generation_id.in_(generation_ids)))
+            conn.execute(dm.speech_segments.delete().where(dm.speech_segments.c.generation_id.in_(generation_ids)))
+            conn.execute(dm.delivery_commands.delete().where(dm.delivery_commands.c.generation_id.in_(generation_ids)))
+            conn.execute(dm.generation_stream_events.delete().where(dm.generation_stream_events.c.generation_id.in_(generation_ids)))
+            conn.execute(dm.conversation_live_events.delete().where(dm.conversation_live_events.c.conversation_id==conversation_id))
+            if generation_ids:
+                conn.execute(m.outbox.delete().where(m.outbox.c.event_type.in_(["generation.requested","memory.extract"]),or_(m.outbox.c.payload["generation_id"].astext.in_([str(key) for key in generation_ids]),m.outbox.c.payload["conversation_id"].astext==str(conversation_id))))
+                conn.execute(m.generations.delete().where(m.generations.c.id.in_(generation_ids)))
+            conn.execute(m.requests.delete().where(m.requests.c.conversation_id==conversation_id))
+            conn.execute(m.conversations.delete().where(m.conversations.c.id==conversation_id))
+        self.collect_garbage()
+        return {"deleted":str(conversation_id),"deleted_events":len(event_ids),"deletion_id":intent["deletion_id"] if intent else None,"ledger_synced":intent["ledger_synced"] if intent else None}
+
     @staticmethod
     def apply(conn,intent):
         if conn.execute(select(deletion_tombstones.c.id).where(deletion_tombstones.c.id==UUID(intent["deletion_id"]))).first(): return
@@ -133,14 +160,14 @@ class DeletionService:
         ids=[row["id"] for row in rows]
         media_ids=set(conn.scalars(select(m.asset_refs.c.asset_id).where(m.asset_refs.c.event_id.in_(ids))))
         media_ids.update(key for key in conn.scalars(select(dm.speech_segments.c.asset_id).where(dm.speech_segments.c.generation_id.in_(generation_ids))) if key)
-        memory_ids=list(conn.scalars(select(mm.source_refs.c.memory_id).where(mm.source_refs.c.event_id.in_(ids))))
-        conn.execute(mm.memory_relations.delete().where(or_(mm.memory_relations.c.from_memory_id.in_(memory_ids),mm.memory_relations.c.to_memory_id.in_(memory_ids))))
-        conn.execute(mm.source_refs.delete().where(mm.source_refs.c.memory_id.in_(memory_ids)))
-        conn.execute(mm.memory_items.delete().where(mm.memory_items.c.id.in_(memory_ids)))
+        # Keep derived long-term memories when their conversation is deleted; only
+        # the raw provenance links go away because the source events are purged.
+        conn.execute(mm.source_refs.delete().where(mm.source_refs.c.event_id.in_(ids)))
         conn.execute(mm.retrieval_chunks.delete().where(mm.retrieval_chunks.c.source_id.in_(ids)))
         conn.execute(mm.quarantine.delete().where(mm.quarantine.c.companion_id==companion_id))
         conn.execute(im.commitments.delete().where(im.commitments.c.source_event_id.in_(ids)))
         conn.execute(m.asset_refs.delete().where(m.asset_refs.c.event_id.in_(ids)))
+        conn.execute(m.stickers.delete().where(m.stickers.c.source_event_id.in_(ids), m.stickers.c.source=='captured'))
         conn.execute(dm.speech_segments.update().where(or_(dm.speech_segments.c.source_event_id.in_(ids),dm.speech_segments.c.generation_id.in_(generation_ids))).values(source_event_id=None,asset_id=None,display_text="",spoken_text="",state="cancelled"))
         conn.execute(dm.avatar_cues.delete().where(dm.avatar_cues.c.generation_id.in_(generation_ids)))
         conn.execute(dm.generation_stream_events.delete().where(dm.generation_stream_events.c.generation_id.in_(generation_ids)))
@@ -149,6 +176,7 @@ class DeletionService:
         conn.execute(m.events.delete().where(m.events.c.id.in_(ids)))
         for asset_id in media_ids:
             remaining=conn.execute(select(m.asset_refs).where(m.asset_refs.c.asset_id==asset_id)).first()
+            if conn.execute(select(m.stickers.c.id).where(m.stickers.c.asset_id==asset_id)).first(): continue
             if remaining: continue
             asset=conn.execute(select(m.assets).where(m.assets.c.id==asset_id)).mappings().first()
             if not asset: continue

@@ -4,10 +4,17 @@ version = "0.1.0"
 description = "Portable authoritative companion archive and gateway"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-  "pydantic==2.12.5", "PyYAML==6.0.3", "fastapi==0.121.0",
-  "uvicorn==0.38.0", "SQLAlchemy==2.0.44", "psycopg[binary]==3.2.12",
-  "alembic==1.17.1", "httpx==0.28.1", "python-multipart==0.0.20",
+  "pydantic==2.12.5",
+  "PyYAML==6.0.3",
+  "fastapi==0.121.0",
+  "uvicorn==0.38.0",
+  "SQLAlchemy==2.0.44",
+  "psycopg[binary]==3.2.12",
+  "alembic==1.17.1",
+  "httpx==0.28.1",
+  "python-multipart==0.0.20",
   "Pillow==12.0.0",
+  "websockets==15.0.1",
 ]
 [dependency-groups]
 dev = ["pytest==8.4.2", "pytest-asyncio==1.2.0", "jsonschema==4.25.1"]

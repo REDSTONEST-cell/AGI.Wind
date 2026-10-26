@@ -1,9 +1,35 @@
-param([int]$Port = 18440)
+﻿param([int]$Port = 18440, [string]$BindHost = '127.0.0.1')
 $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 . (Join-Path $PSScriptRoot 'http-local.ps1')
 $pythonExe = Join-Path $projectRoot 'app\.venv\Scripts\python.exe'
 $stateDir = Join-Path $projectRoot 'data'
+$scriptDir = $PSScriptRoot
+
+function Start-LocalVoice {
+    $memoryRuntime = $null
+    $persistedPath = Join-Path $stateDir 'settings.json'
+    if (Test-Path -LiteralPath $persistedPath) {
+        try { $memoryRuntime = (Get-Content -LiteralPath $persistedPath -Raw -Encoding UTF8 | ConvertFrom-Json).memory } catch {}
+    }
+    if ((Test-Path -LiteralPath (Join-Path $projectRoot 'config\memory.local.json')) -and $memoryRuntime.memory_semantic_enabled -ne $false) {
+        try { & (Join-Path $scriptDir 'start-memory-model.ps1') } catch { Write-Output "Memory model startup failed: $($_.Exception.Message)" }
+    }
+    if ($memoryRuntime.memory_worker_mode -eq 'separate') {
+        try { & (Join-Path $scriptDir 'start-memory-worker.ps1') } catch { Write-Output "Memory worker startup failed: $($_.Exception.Message)" }
+    }
+    if (Test-Path -LiteralPath (Join-Path $projectRoot 'config\https.local.json')) {
+        try { & (Join-Path $scriptDir 'start-https.ps1') } catch { Write-Output "HTTPS startup failed: $($_.Exception.Message)" }
+    }
+    try { & (Join-Path $scriptDir 'start-asr.ps1') } catch { Write-Output "实时识别启动失败，网关继续运行：$($_.Exception.Message)" }
+    $voiceScript = Join-Path $scriptDir 'start-voice.ps1'
+    if (-not (Test-Path -LiteralPath $voiceScript)) {
+        Write-Output '未找到 scripts/start-voice.ps1，跳过本地语音启动。'
+        return
+    }
+    try { & $voiceScript } catch { Write-Output "语音服务启动失败，网关继续运行：$($_.Exception.Message)" }
+}
+
 if (-not (Test-Path -LiteralPath $pythonExe)) { throw 'Run the project dependency setup first; see docs/ops/runbook.md.' }
 & $pythonExe (Join-Path $projectRoot 'scripts\setup-dev-postgres.py')
 if ($LASTEXITCODE -ne 0) { throw 'Project PostgreSQL startup failed.' }
@@ -13,20 +39,54 @@ $pidFile = Join-Path $stateDir 'gateway.pid'
 if (Test-Path -LiteralPath $pidFile) {
     $savedPid = [int](Get-Content -LiteralPath $pidFile -Raw)
     $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid" -ErrorAction SilentlyContinue
-    if ($existing -and $existing.CommandLine.Contains('agi_wind.cli') -and $existing.CommandLine.Contains($projectRoot)) {
+    $owned = $existing -and $existing.CommandLine.Contains('agi_wind.cli') -and $existing.CommandLine.Contains($projectRoot)
+    $existingLive = $false
+    if ($owned) {
+        for ($probe = 0; $probe -lt 10; $probe++) {
+            try {
+                $reply = Invoke-LocalHttp -Uri "http://127.0.0.1:$Port/health/live" -TimeoutMs 1500
+                if ($reply.StatusCode -eq 200 -and ($reply.Body | ConvertFrom-Json).status -eq 'live') { $existingLive = $true; break }
+            } catch {}
+            Start-Sleep -Milliseconds 500
+        }
+    }
+    if ($owned -and $existingLive) {
         Write-Output "Gateway already running: http://127.0.0.1:$Port"
+        Start-LocalVoice
         exit 0
     }
+    if ($owned) {
+        # A verified project process that does not answer /health/live cannot be reused; leaving it
+        # would make the next start appear successful while the port is still held.
+        Write-Output "Stale Gateway process $savedPid is not live; stopping the verified project process before restart."
+        $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$savedPid" -ErrorAction SilentlyContinue
+        foreach ($child in @($children)) {
+            if ($child -and $child.CommandLine -and $child.CommandLine.Contains('agi_wind.cli')) {
+                Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Stop-Process -Id $savedPid -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    }
 }
-$argsList = @('-m', 'agi_wind.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$Port")
+$argsList = @('-m', 'agi_wind.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$Port", '--host', $BindHost)
 $process = Start-Process -FilePath $pythonExe -ArgumentList $argsList -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'gateway.stdout.log') -RedirectStandardError (Join-Path $stateDir 'gateway.stderr.log') -PassThru
 [IO.File]::WriteAllText($pidFile, "$($process.Id)")
 [IO.File]::WriteAllText((Join-Path $stateDir 'gateway-port.txt'), "$Port")
+[IO.File]::WriteAllText((Join-Path $stateDir 'gateway-host.txt'), $BindHost)
 for ($attempt = 0; $attempt -lt 30; $attempt++) {
     Start-Sleep -Milliseconds 300
     try {
         $result = Invoke-LocalHttp -Uri "http://127.0.0.1:$Port/health/live" -TimeoutMs 2000
-        if ($result.StatusCode -eq 200 -and ($result.Body | ConvertFrom-Json).status -eq 'live') { Write-Output "Gateway running: http://127.0.0.1:$Port"; exit 0 }
+        if ($result.StatusCode -eq 200 -and ($result.Body | ConvertFrom-Json).status -eq 'live') {
+            if ($BindHost -in @('127.0.0.1', 'localhost', '::1')) {
+                Write-Output "Gateway running: http://127.0.0.1:$Port"
+            } else {
+                Write-Output "Gateway running: http://${BindHost}:$Port (LAN mode; client key authentication required)"
+            }
+            Start-LocalVoice
+            exit 0
+        }
     } catch {}
     if ($process.HasExited) { throw 'Gateway exited; inspect data/gateway.stderr.log.' }
 }

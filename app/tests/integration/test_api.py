@@ -42,8 +42,13 @@ async def test_browser_home_opens_even_when_models_are_unconfigured(db,actor,see
         home=await client.get("/")
         assert home.status_code==200
         assert home.headers["content-type"].startswith("text/html")
-        assert "AGI.Wind" in home.text and "本地服务" in home.text
+        assert "AGI.Wind" in home.text
         assert "synthetic-private-token" not in home.text
+        # The dependency status page moved to /status and must still render while models are unconfigured.
+        status=await client.get("/status")
+        assert status.status_code==200
+        assert "本地服务" in status.text
+        assert "synthetic-private-token" not in status.text
         # A successful browser landing must not disguise unavailable dependencies.
         ready=await client.get("/health/ready")
         assert ready.status_code==503

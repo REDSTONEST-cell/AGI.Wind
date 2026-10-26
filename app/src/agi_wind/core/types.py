@@ -21,6 +21,13 @@ class Scope(Actor):
     conversation_id: UUID
 
 
+class SceneScope(Scope):
+    """Server-constructed access scene. Never taken from request text or the model."""
+
+    scene: Literal["owner_private", "group"] = "owner_private"
+    room_id: UUID | None = None
+
+
 class ModelRef(DTO):
     provider_id: str
     model_id: str
@@ -67,6 +74,11 @@ class OutputOptions(DTO):
     text: bool = True
     audio: bool = False
     avatar: bool = False
+    # auto uses the server-side probability; always forces a voice message for this
+    # request; off never synthesizes. Legacy audio=True is treated as always.
+    voice: Literal["auto", "always", "off"] = "auto"
+    # Calls use incremental text without waiting for the non-streaming Agent tool loop.
+    realtime: bool = False
 
 
 class ChatRequest(DTO):
@@ -116,6 +128,7 @@ class ContextBundle(DTO):
     vision_observations: list[dict[str, Any]]
     token_estimate: int
     selected_source_ids: list[UUID]
+    current_speaker: str | None = None
 
 
 class RuntimeRequest(DTO):

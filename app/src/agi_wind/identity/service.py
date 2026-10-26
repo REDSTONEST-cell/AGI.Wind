@@ -31,6 +31,13 @@ class IdentityService:
             commitments = [dict(item) for item in conn.execute(select(i.commitments).where(i.commitments.c.companion_id == companion_id, i.commitments.c.user_id == actor.user_id, i.commitments.c.status == "pending")).mappings()]
             return PersonaSnapshot(companion_id=companion_id, version=row["version"], core=row["core"], style=row["style"], relationship=relationship, commitments=commitments)
 
+    async def snapshot_scene(self, scope):
+        """Group members never inherit the owner's private relationship or promises."""
+        snapshot = await self.snapshot(scope, scope.companion_id)
+        if getattr(scope, "scene", "owner_private") == "group":
+            return snapshot.model_copy(update={"relationship": {}, "commitments": []})
+        return snapshot
+
     async def update(self, actor, companion_id, expected_version, patch, origin="user"):
         if origin != "user": raise AppError("PROPOSAL_ONLY", "人格建议须由用户接受后应用", 403)
         if set(patch) - {"core", "style", "human_notes"}: raise AppError("INVALID_PATCH", "不支持的人格字段", 422)

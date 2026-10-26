@@ -62,8 +62,11 @@ def main():
     parser.add_argument("--root",type=Path,default=Path(__file__).resolve().parents[3])
     commands=parser.add_subparsers(dest="command",required=True)
     commands.add_parser("init-local")
+    memory_worker=commands.add_parser('memory-worker')
+    memory_worker.add_argument('--once',action='store_true',help='执行一次记忆后台周期后退出')
     serve=commands.add_parser("serve")
     serve.add_argument("--port",type=int,default=18440)
+    serve.add_argument("--host",default=None,help="监听地址；局域网服务用 0.0.0.0，默认 127.0.0.1")
     archive=commands.add_parser("archive")
     ac=archive.add_subparsers(dest="operation",required=True)
     verify=ac.add_parser("verify"); verify.add_argument("path",type=Path)
@@ -73,12 +76,19 @@ def main():
     args=parser.parse_args()
     root=args.root.resolve()
     if args.command=="init-local": init_local(root)
+    elif args.command == 'memory-worker':
+        from .memory.runtime import run_worker
+        asyncio.run(run_worker(root,once=args.once))
     elif args.command=="serve":
         os.environ["AGI_CONFIG"]=str(root/"config/app.local.yaml")
+        if args.host: os.environ["AGI_HOST"]=args.host
         from .api.app import from_env
         import uvicorn
         app=from_env()
-        server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=args.port,log_level="info",access_log=False))
+        host=os.environ.get("AGI_HOST") or app.state.settings.host
+        if host not in ("127.0.0.1","localhost","::1") and app.state.settings.client_key.get_secret_value()=="123456":
+            print("WARNING: gateway is reachable beyond this machine while the client key is the default 123456; change client_key in config/app.local.yaml before real use.",flush=True)
+        server=uvicorn.Server(uvicorn.Config(app,host=host,port=args.port,log_level="info",access_log=False))
         app.state.request_shutdown=lambda:setattr(server,"should_exit",True)
         server.run()
     elif args.command=="archive":

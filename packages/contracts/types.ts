@@ -68,6 +68,8 @@ export type ConversationId1 = string;
 export type Text2 = boolean;
 export type Audio = boolean;
 export type Avatar = boolean;
+export type Voice = "auto" | "always" | "off";
+export type Realtime = boolean;
 export type DeviceId = string;
 export type RequestId1 = string;
 export type GenerationId2 = string;
@@ -110,11 +112,17 @@ export type Type1 =
   | "text.segment"
   | "text.completed"
   | "audio.segment"
+  | "speech.queued"
   | "avatar.cue"
   | "generation.completed"
   | "generation.cancelled"
   | "generation.failed"
-  | "warning";
+  | "warning"
+  | "reasoning.delta"
+  | "reasoning.completed"
+  | "tool.started"
+  | "tool.completed"
+  | "sticker.sent";
 export type GenerationId5 = string;
 export type Epoch5 = number;
 export type Timestamp = string;
@@ -293,6 +301,8 @@ export interface OutputOptions {
   text?: Text2;
   audio?: Audio;
   avatar?: Avatar;
+  voice?: Voice;
+  realtime?: Realtime;
 }
 /**
  * This interface was referenced by `AGIWindProtocol10`'s JSON-Schema

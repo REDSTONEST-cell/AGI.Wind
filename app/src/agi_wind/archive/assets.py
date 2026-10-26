@@ -18,7 +18,7 @@ class AssetStore:
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_image_bytes=max_image_bytes
 
-    async def put(self, actor, stream, declared_mime):
+    async def put(self, actor, stream, declared_mime, original_filename=None):
         staged = None
         limit=min(self.max_bytes,self.max_image_bytes) if declared_mime.startswith("image/") else self.max_bytes
         try:
@@ -33,6 +33,8 @@ class AssetStore:
                 temp.flush()
                 os.fsync(temp.fileno())
             mime, ext, metadata = self.inspect(staged, declared_mime)
+            if original_filename:
+                metadata['original_filename']=str(original_filename).replace('\\','/').rsplit('/',1)[-1][:200]
             sha = hasher.hexdigest()
             relative = Path(sha[:2]) / (sha + "." + ext)
             final = self.root / relative
@@ -51,15 +53,22 @@ class AssetStore:
     @staticmethod
     def inspect(path, declared_mime):
         try:
-            if declared_mime in ("image/png", "image/jpeg", "image/webp"):
+            if declared_mime in ("image/png", "image/jpeg", "image/webp", "image/gif"):
                 with Image.open(path) as image:
+                    # Trust the decoded bytes, not the extension/MIME the browser declared:
+                    # drag-and-drop temp files are often JPEG/WebP data saved with a .png name.
                     mime = Image.MIME.get(image.format)
-                    if mime != declared_mime or image.width * image.height > 25_000_000:
-                        raise ValueError("MIME/dimension mismatch")
-                    metadata = {"width": image.width, "height": image.height}
-                    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}[mime]
+                    if mime not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+                        raise ValueError("unsupported image format")
+                    if image.width * image.height > 25_000_000:
+                        raise ValueError("dimension mismatch")
+                    frames=getattr(image,'n_frames',1)
+                    if frames>200 or frames*image.width*image.height>50_000_000: raise ValueError('too many pixels/frames')
+                    metadata = {"width": image.width, "height": image.height, "frames": frames}
+                    ext = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif":"gif"}[mime]
                     image.verify()
-                with Image.open(path) as image: image.load()
+                with Image.open(path) as image:
+                    for frame in range(frames): image.seek(frame); image.load()
                 return mime, ext, metadata
             if declared_mime in ("audio/wav", "audio/x-wav"):
                 with wave.open(str(path), "rb") as audio:

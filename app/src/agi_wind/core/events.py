@@ -34,7 +34,7 @@ class StreamEvent(DTO):
     protocol_version: Literal["1.0"] = "1.0"
     event_id: UUID = Field(default_factory=uuid4)
     sequence: int = Field(ge=1)
-    type: Literal["accepted", "memory.context", "text.delta", "text.segment", "text.completed", "audio.segment", "avatar.cue", "generation.completed", "generation.cancelled", "generation.failed", "warning"]
+    type: Literal["accepted", "memory.context", "text.delta", "text.segment", "text.completed", "audio.segment", "speech.queued", "avatar.cue", "generation.completed", "generation.cancelled", "generation.failed", "warning", "reasoning.delta", "reasoning.completed", "tool.started", "tool.completed", "sticker.sent"]
     generation_id: UUID
     epoch: int = Field(ge=1)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

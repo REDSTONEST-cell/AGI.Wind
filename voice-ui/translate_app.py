@@ -1,0 +1,65 @@
+from pathlib import Path
+
+path = Path(r"C:\Users\wind\Desktop\AGI.Wind\voice-ui\app.js")
+text = path.read_text(encoding="utf-8")
+
+replacements = {
+    '"upload a clip instead"': '"改为上传参考音频"',
+    'upload a clip instead': "改为上传参考音频",
+    '"  temporary"': '"  临时"',
+    "NAME THE VOICE FIRST": "请先填写音色名称",
+    "NAME CAN ONLY USE LETTERS, DIGITS, DASH AND UNDERSCORE": "名称只能使用字母、数字、短横线和下划线",
+    "A CLIP AND ITS TRANSCRIPT ARE REQUIRED TO SAVE A VOICE": "保存音色需要参考音频和逐字文本",
+    "SAVING VOICE ...": "正在保存音色…",
+    "BUSY - ONE REQUEST AT A TIME": "服务忙，一次只能处理一个请求",
+    '"ERROR: "': '"错误："',
+    '"SAVED "': '"已保存 "',
+    "ENCODING REFERENCE ...": "正在编码参考音频…",
+    "could not encode the reference": "参考音频编码失败",
+    "TEXT IS REQUIRED": "请先填写要朗读的文本",
+    "CONNECTING ...": "连接中…",
+    '"STREAMING - "': '"流式生成 - "',
+    '"GENERATING - "': '"生成中 - "',
+    '" REBUFFER)"': '" 次重新缓冲)"',
+    '" REBUFFER"': '" 次重新缓冲"',
+    "QUEUED, WAITING FOR THE GPU ...": "已排队，等待显卡…",
+    '"STOPPED"': '"已停止"',
+    '"DONE - "': '"完成 - "',
+    '"unknown"': '"未知"',
+    "WEBSOCKET ERROR": "WebSocket 错误",
+    '"STREAMING ..."': '"流式生成中…"',
+    '"GENERATING ..."': '"生成中…"',
+    "A SOURCE WAV IS REQUIRED": "请先选择源音频（WAV）",
+    "PICK A SAVED VOICE OR UPLOAD A TARGET VOICE WAV": "请选择已保存音色，或上传目标音色 WAV",
+    "TARGET VOICE TRANSCRIPT IS REQUIRED": "请填写目标音色逐字文本",
+    "CONVERTING ...": "转换中…",
+    '"RECEIVING - "': '"接收中 - "',
+    "Speak clearly and naturally.": "清晰、自然地朗读。",
+    'el("button", "ghost", "USE")': 'el("button", "ghost", "使用")',
+    'use.title = "pick this voice in the clone tab";': 'use.title = "在音色克隆页使用这个音色";',
+    'v.saved ? "SAVED" : "TEMPORARY"': 'v.saved ? "已保存" : "临时"',
+    'el("label", "", "DESCRIPTION")': 'el("label", "", "描述")',
+    'desc.placeholder = "what this voice sounds like, where it came from, what it is good for";': 'desc.placeholder = "这个音色听起来怎样、来自哪里、适合什么场景";',
+    'el("label", "", "EXTRA FIELDS")': 'el("label", "", "额外字段")',
+    'el("button", "ghost", "+ FIELD")': 'el("button", "ghost", "+ 字段")',
+    'el("button", "go", "SAVE CHANGES")': 'el("button", "go", "保存修改")',
+    'temporary voices lose their notes when the server restarts': "临时音色在服务重启后会丢失备注",
+    'status.textContent = "unsaved changes"': 'status.textContent = "有未保存的修改"',
+    'if (status.textContent === "unsaved changes") status.textContent = "";': 'if (status.textContent === "有未保存的修改") status.textContent = "";',
+    'k.placeholder = "field";': 'k.placeholder = "字段";',
+    'val.placeholder = "value";': 'val.placeholder = "值";',
+    'del.title = "remove field";': 'del.title = "删除字段";',
+    '"field names are letters, digits, dot, dash or underscore: "': '"字段名只能使用字母、数字、点、短横线或下划线："',
+    'status.textContent = "saving ..."': 'status.textContent = "正在保存…"',
+    'status.textContent = v.saved ? "saved" : "updated until the server restarts";': 'status.textContent = v.saved ? "已保存" : "已更新，服务重启后恢复原值";',
+    'status.textContent = "error: " + e.message;': 'status.textContent = "错误：" + e.message;',
+    '"no voices yet, save one from the clone, direction or changer tab"': '"还没有音色，请先在音色克隆、风格控制或音色转换页保存一个"',
+    'voices.length + " voices"': 'voices.length + " 个音色"',
+    'shown + " of " + voices.length + " voices"': 'shown + " / " + voices.length + " 个音色"',
+    'v.seconds.toFixed(1) + "s"': 'v.seconds.toFixed(1) + "秒"',
+}
+for old, new in replacements.items():
+    text = text.replace(old, new)
+
+path.write_text(text, encoding="utf-8")
+print("translated", path)

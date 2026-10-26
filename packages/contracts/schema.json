@@ -501,6 +501,21 @@
           "default": false,
           "title": "Avatar",
           "type": "boolean"
+        },
+        "voice": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "always",
+            "off"
+          ],
+          "title": "Voice",
+          "type": "string"
+        },
+        "realtime": {
+          "default": false,
+          "title": "Realtime",
+          "type": "boolean"
         }
       },
       "title": "OutputOptions",
@@ -823,11 +838,17 @@
             "text.segment",
             "text.completed",
             "audio.segment",
+            "speech.queued",
             "avatar.cue",
             "generation.completed",
             "generation.cancelled",
             "generation.failed",
-            "warning"
+            "warning",
+            "reasoning.delta",
+            "reasoning.completed",
+            "tool.started",
+            "tool.completed",
+            "sticker.sent"
           ],
           "title": "Type",
           "type": "string"

@@ -25,6 +25,10 @@ async def test_duplicate_submit_and_reconnect_never_regenerate(db, actor, seeded
     events = service.replay(actor, first.generation_id, 0)
     assert events[-1].type == "generation.completed"
     assert "".join(e.payload["text"] for e in events if e.type == "text.delta") == "你好，世界。"
+    context_event = next(e for e in events if e.type == "memory.context")
+    assert context_event.payload["memory_count"] >= len(context_event.payload["memory_ids"])
+    assert context_event.payload["token_estimate"] > 0
+    assert context_event.payload["model"] == {"provider_id": "fake", "model_id": "synthetic"}
     cutoff = events[1].sequence
     replay = service.replay(actor, first.generation_id, cutoff)
     assert all(event.sequence > cutoff for event in replay)

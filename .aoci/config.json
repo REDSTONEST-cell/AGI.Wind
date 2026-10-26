@@ -129,6 +129,138 @@
         "created_by": "aoci-init",
         "order": 106,
         "enabled": true
+      },
+      {
+        "rule_id": "project-runtime-devtools",
+        "action": "exclude",
+        "pattern": ".devtools",
+        "pattern_kind": "directory",
+        "reason": "项目隔离运行环境、第三方依赖、临时验证和历史快照；生产源码在app/scripts/packages/config/docs",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1000,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-build-output",
+        "action": "exclude",
+        "pattern": "output",
+        "pattern_kind": "directory",
+        "reason": "Generated packages and asset previews",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-external-tools",
+        "action": "exclude",
+        "pattern": "tools",
+        "pattern_kind": "directory",
+        "reason": "External tools and original research assets; adapters remain in app and scripts",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-model-cache",
+        "action": "exclude",
+        "pattern": "fastembed_cache",
+        "pattern_kind": "directory",
+        "reason": "Downloaded rebuildable model cache",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-node-modules",
+        "action": "exclude",
+        "pattern": "**/node_modules/**",
+        "pattern_kind": "glob",
+        "reason": "Rebuildable third party JavaScript dependencies",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-pip-work",
+        "action": "exclude",
+        "pattern": "pip-*/**",
+        "pattern_kind": "glob",
+        "reason": "Generated pip build and unpack caches",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-pytest-work",
+        "action": "exclude",
+        "pattern": "pytest-of-wind",
+        "pattern_kind": "directory",
+        "reason": "Generated isolated test data",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-research",
+        "action": "exclude",
+        "pattern": "research",
+        "pattern_kind": "directory",
+        "reason": "Downloaded third party references",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-runtime-data",
+        "action": "exclude",
+        "pattern": "data",
+        "pattern_kind": "directory",
+        "reason": "Private runtime databases tokens media logs and verification output",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-temporary",
+        "action": "exclude",
+        "pattern": ".tmp",
+        "pattern_kind": "directory",
+        "reason": "调试脚本、临时语音转换及第三方安装输入，不是交付源码",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-venvs",
+        "action": "exclude",
+        "pattern": "**/.venv/**",
+        "pattern_kind": "glob",
+        "reason": "Third party Python virtual environments",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
+      },
+      {
+        "rule_id": "project-worker-ledgers",
+        "action": "exclude",
+        "pattern": ".superpowers",
+        "pattern_kind": "directory",
+        "reason": "Task runtime ledgers; formal design and acceptance remain in docs",
+        "source": "user",
+        "created_by": "codex",
+        "order": 1001,
+        "enabled": true
       }
     ]
   },

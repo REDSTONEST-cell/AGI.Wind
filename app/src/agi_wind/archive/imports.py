@@ -33,7 +33,8 @@ class ImportService:
                     if total>max_bytes: raise ValueError("archive too large")
                 if z.getinfo("manifest.json").file_size>2*1024*1024: raise ValueError("manifest too large")
                 manifest=json.loads(z.read("manifest.json"))
-                if manifest.get("archive_format_version")!=1 or manifest.get("schema_version")!="0006_restore_origins": raise ValueError("unsupported schema")
+                supported={(1,"0006_restore_origins"),(2,"0007_conversation_lifecycle"),(3,"0008_reasoning_stickers"),(4,"0014_qq_channels")}
+                if (manifest.get("archive_format_version"),manifest.get("schema_version")) not in supported: raise ValueError("unsupported schema")
                 expected=manifest["files"]
                 if set(names)!=set(expected)|{"manifest.json"}: raise ValueError("unlisted member")
                 records={}
@@ -48,6 +49,11 @@ class ImportService:
                         columns=set(m.metadata.tables[table].c.keys())
                         if any(set(row)-columns for row in rows): raise ValueError("unknown columns")
                         records[table]=len(rows)
+                if manifest['archive_format_version'] < 3: records.setdefault('stickers', 0)
+                if manifest['archive_format_version'] < 4:
+                    # Pre-channel archives carry no room/member tables; safe empty defaults.
+                    for name in ARCHIVE_TABLE_ORDER:
+                        records.setdefault(name, 0)
                 if set(records)!=set(ARCHIVE_TABLE_ORDER): raise ValueError("missing authoritative table")
                 return {"valid":True,"records":records,"manifest":manifest}
         except (OSError,ValueError,KeyError,TypeError,zipfile.BadZipFile):
@@ -68,7 +74,8 @@ class ImportService:
             data["memory_relations"]=[row for row in data["memory_relations"] if row["from_memory_id"] not in memory_ids and row["to_memory_id"] not in memory_ids]
             removed_assets={row["asset_id"] for row in data["asset_refs"] if row["event_id"] in ids}
             data["asset_refs"]=[row for row in data["asset_refs"] if row["event_id"] not in ids]
-            still_referenced={row["asset_id"] for row in data["asset_refs"]}
+            data['stickers']=[row for row in data['stickers'] if row.get('source_event_id') not in ids or row['source']=='uploaded']
+            still_referenced={row["asset_id"] for row in data["asset_refs"]} | {row['asset_id'] for row in data['stickers']}
             remove_assets=removed_assets-still_referenced
             data["assets"]=[row for row in data["assets"] if row["id"] not in remove_assets]
             data["asset_owners"]=[row for row in data["asset_owners"] if row["asset_id"] not in remove_assets]
@@ -86,7 +93,7 @@ class ImportService:
         if mode not in ("new_namespace","clone"): raise AppError("REPLACE_REQUIRES_RECOVERY_POINT","覆盖恢复尚未开放；使用空环境或 clone",409)
         report=self.validate(path)
         with zipfile.ZipFile(path) as z:
-            data={name:[json.loads(line) for line in z.read(name+".ndjson").splitlines()] for name in ARCHIVE_TABLE_ORDER}
+            data={name:[json.loads(line) for line in z.read(name+".ndjson").splitlines()] if name+'.ndjson' in z.namelist() else [] for name in ARCHIVE_TABLE_ORDER}
             records=latest_ledger.load() if latest_ledger else []
             data=self.sanitize(data,records)
             trusted=latest_ledger is not None and latest_ledger.path.is_file()

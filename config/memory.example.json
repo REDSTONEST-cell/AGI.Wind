@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "url": "http://127.0.0.1:8141",
+  "model": "BAAI/bge-small-zh-v1.5",
+  "device": "cpu",
+  "threads": 2,
+  "dimension": 512,
+  "setup": "scripts/setup-memory-model.ps1 creates memory.local.json with actual artifact hashes and a separate private token"
+}

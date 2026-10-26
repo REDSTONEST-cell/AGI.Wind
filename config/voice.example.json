@@ -1,0 +1,10 @@
+{
+  "binary": "C:/Models/Breeze-TTS-2/breeze-tts-2-cpp/breeze-tts-2-v0.1.3-windows-x64-vulkan/breeze-server.exe",
+  "model": "C:/Models/Breeze-TTS-2/breeze-tts-2-q8_0.gguf",
+  "voices_dir": "C:/Models/Breeze-TTS-2/voices",
+  "host": "127.0.0.1",
+  "port": 8137,
+  "chunk_first": 4,
+  "chunk_max": 40,
+  "webui": true
+}

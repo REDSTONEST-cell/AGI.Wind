@@ -3,6 +3,20 @@ from . import models as d
 from ..archive.repository import lock
 from ..core.events import StreamEvent
 
+def finish_open_tools(conn,generation_id,epoch,code,*,cancelled=False):
+    """Close real in-progress trace steps in the same transaction as failure/cancellation."""
+    from ..archive import models as m
+    from ..archive.repository import digest
+    row=conn.execute(select(m.events).where(m.events.c.generation_id==generation_id,m.events.c.role=='assistant')).mappings().first()
+    if not row:return
+    content=dict(row['content'])
+    content['state']='cancelled' if cancelled else ('partial' if content.get('text') else 'failed')
+    for step in content.get('trace',[]):
+        if step.get('type')!='tool' or step.get('status')!='running':continue
+        step.update(status='failed',code=code,summary='操作已停止' if cancelled else '操作失败')
+        emit(conn,generation_id,'tool.completed',{'step_id':step['id'],'tool':step['tool'],'stage':step['stage'],'status':'failed','code':code,'summary':step['summary']},epoch)
+    conn.execute(m.events.update().where(m.events.c.id==row['id']).values(content=content,content_sha256=digest(content)))
+
 def emit(conn, generation_id, type, payload, epoch):
     lock(conn, generation_id)
     sequence = (conn.scalar(select(func.max(d.generation_stream_events.c.sequence)).where(d.generation_stream_events.c.generation_id == generation_id)) or 0) + 1
