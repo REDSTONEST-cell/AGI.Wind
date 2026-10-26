@@ -79,6 +79,10 @@ class QQUpdate(QQSettings):
     token: SecretStr | None = Field(default=None, min_length=32, max_length=200)
 
 
+class QQGroupToggle(DTO):
+    enabled: bool
+
+
 def request_id_for(bot, message_id):
     return uuid5(NAMESPACE_URL, f'agi-wind:onebot:{bot}:{message_id}')
 
@@ -461,16 +465,37 @@ class QQBridge:
             if not pending or time.monotonic()>=deadline: return content
             await asyncio.sleep(0.2)
 
-    async def _reply_parts(self, content):
-        parts=[{'type':'text','data':{'text':text}} for text,_ in split_reply(content.get('text',''))]
-        for item in content.get('attachments') or []:
-            kind=item.get('kind')
-            if kind not in ('image','audio'): continue
+    async def _media_part(self, item):
+        kind=item.get('kind')
+        if kind not in ('image','audio'): return None
+        try:
             asset,path=self.assets.get(self.actor,UUID(item['asset_id']))
-            if asset['kind']!=kind or asset['bytes']>10*1024*1024: continue
-            raw=await asyncio.to_thread(path.read_bytes)
-            parts.append({'type':'record' if kind=='audio' else 'image',
-                          'data':{'file':'base64://'+base64.b64encode(raw).decode()}})
+        except Exception:
+            return None
+        if asset['kind']!=kind or asset['bytes']>10*1024*1024: return None
+        raw=await asyncio.to_thread(path.read_bytes)
+        return {'type':'record' if kind=='audio' else 'image',
+                'data':{'file':'base64://'+base64.b64encode(raw).decode()}}
+
+    async def _reply_parts(self, content):
+        # A voiced segment must not be repeated as text: QQ receives the record,
+        # the text bubble stays as the fallback for failed or missing speech.
+        attachments=list(content.get('attachments') or [])
+        segments=sorted(content.get('segments') or [],key=lambda item:item.get('index',0))
+        parts=[]
+        if segments:
+            audio={str(item.get('segment_id')):item for item in attachments
+                   if item.get('kind')=='audio' and item.get('segment_id')}
+            for segment in segments:
+                item=audio.get(str(segment.get('segment_id') or '')) if segment.get('kind')=='voice' else None
+                part=await self._media_part(item) if item else None
+                parts.append(part or {'type':'text','data':{'text':segment.get('text','')}})
+            attachments=[item for item in attachments if item.get('kind')!='audio']
+        else:
+            parts=[{'type':'text','data':{'text':text}} for text,_ in split_reply(content.get('text',''))]
+        for item in attachments:
+            part=await self._media_part(item)
+            if part is not None: parts.append(part)
         return parts
 
 
@@ -487,6 +512,7 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
     def groups(companion_id:UUID,current=Depends(authenticate)):
         """Persistent group windows for the current companion (read-only listing)."""
         from ..identity.service import authorize as authorize_companion
+        allowlist=set(settings.qq.allowed_groups)
         with service.db.engine.connect() as conn:
             authorize_companion(conn,current,companion_id)
             rows=conn.execute(select(m.channel_bindings,m.conversations.c.title.label('conversation_title'),
@@ -498,8 +524,40 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
                 .order_by(m.channel_bindings.c.created_at)).mappings()
             return [{'binding_id':str(row['id']),'conversation_id':str(row['conversation_id']),
                      'group_id':row['external_chat_id'],'title':row['title'] or row['conversation_title'],
-                     'enabled':bool(row['enabled']),'conversation_state':row['conversation_state'],
+                     'enabled':row['external_chat_id'] in allowlist,
+                     'conversation_state':row['conversation_state'],
                      'created_at':row['created_at']} for row in rows]
+
+    @app.patch('/api/v1/integrations/qq/groups/{binding_id}')
+    async def toggle_group(binding_id:UUID,body:QQGroupToggle,current=Depends(authenticate)):
+        """Per-group enable/disable: the allowlist is authoritative, the binding mirrors it."""
+        from ..identity.service import authorize as authorize_companion
+        with service.db.engine.connect() as conn:
+            row=conn.execute(select(m.channel_bindings).where(
+                m.channel_bindings.c.id==binding_id,
+                m.channel_bindings.c.account_id==current.account_id)).mappings().first()
+            if not row: raise AppError('NOT_FOUND','群窗口不存在',404)
+            authorize_companion(conn,current,row['companion_id'])
+            group_id=row['external_chat_id']
+        async with bridge.connection_lock:
+            with SETTINGS_WRITE_LOCK:
+                previous=settings.qq
+                try:
+                    groups=list(previous.allowed_groups)
+                    if body.enabled and group_id not in groups: groups.append(group_id)
+                    if not body.enabled and group_id in groups: groups.remove(group_id)
+                    policy=QQSettings.model_validate({**previous.model_dump(),'allowed_groups':groups})
+                    settings.qq=policy
+                    persist_settings(settings)
+                except Exception:
+                    settings.qq=previous
+                    raise
+            with service.db.engine.begin() as conn:
+                conn.execute(m.channel_bindings.update().where(
+                    m.channel_bindings.c.id==binding_id).values(enabled=body.enabled,updated_at=m.now()))
+        logger.info('qq group %s enabled=%s',group_id,body.enabled)
+        return {'binding_id':str(binding_id),'group_id':group_id,'enabled':body.enabled,
+                'allowed_groups':groups}
 
     @app.put('/api/v1/integrations/qq')
     async def update(body:QQUpdate,current=Depends(authenticate)):

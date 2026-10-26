@@ -1,7 +1,8 @@
 /** Owner-only OneBot settings. No QQ passwords or browser-persisted tokens. */
-export function createQQPage(client, getConversation) {
+export function createQQPage(client, getConversation, openWindow = null) {
   const $ = selector => document.querySelector(selector);
   let policy = null;
+  let groups = [];
   const labels = {disabled:'未启用',waiting:'等待 QQ 接入端连接',ready:'已连接 · 可以私聊和群聊',
     generating:'正在回复',stopped:'已停止',failed:'操作失败，请检查系统日志',
     queue_full:'消息较多，请稍候',generation_stopped:'回答已停止',
@@ -32,8 +33,76 @@ export function createQQPage(client, getConversation) {
     $('#qq-conversation').textContent = value.conversation_id ? '已绑定对话；归档后需重新绑定' : '保存时绑定网页当前对话';
   }
 
+  function renderGroups() {
+    const wrap = $('#qq-group-windows');
+    const rows = $('#qq-group-rows');
+    if (!wrap || !rows) return;
+    rows.replaceChildren();
+    wrap.hidden = !groups.length;
+    for (const group of groups) {
+      const row = document.createElement('div');
+      row.className = 'qq-group-row';
+      const copy = document.createElement('div');
+      copy.className = 'qq-group-copy';
+      const title = document.createElement('strong');
+      title.textContent = group.title || ('QQ群 ' + group.group_id);
+      const meta = document.createElement('small');
+      meta.textContent = '群号 ' + group.group_id + (group.enabled ? ' · 已启用' : ' · 已停用');
+      copy.append(title, meta);
+      const label = document.createElement('label');
+      label.className = 'qq-group-switch';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.className = 'switch';
+      toggle.checked = Boolean(group.enabled);
+      toggle.setAttribute('aria-label', '启停 ' + (group.title || group.group_id));
+      toggle.addEventListener('change', () => toggleGroup(group, toggle));
+      label.append(toggle);
+      row.append(copy, label);
+      if (openWindow) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn ghost small';
+        button.textContent = '打开窗口';
+        button.addEventListener('click', () => openWindow(group.conversation_id));
+        row.append(button);
+      }
+      rows.append(row);
+    }
+  }
+
+  async function loadGroups() {
+    const companionId = getConversation()?.companion_id;
+    if (!companionId) { groups = []; renderGroups(); return; }
+    try { groups = await client.qqGroups(companionId); }
+    catch { groups = []; }
+    renderGroups();
+  }
+
+  async function toggleGroup(group, toggle) {
+    const target = toggle.checked;
+    toggle.disabled = true;
+    try {
+      const result = await client.request('/api/v1/integrations/qq/groups/' + encodeURIComponent(group.binding_id), {
+        method: 'PATCH', body: {enabled: target},
+      });
+      group.enabled = Boolean(result.enabled);
+      $('#qq-hint').textContent = (group.title || group.group_id) + (result.enabled ? ' 已启用。' : ' 已停用，不再触发回复和成员记忆。');
+      show(await client.request('/api/v1/integrations/qq'));
+      await loadGroups();
+    } catch (error) {
+      toggle.checked = !target;
+      $('#qq-hint').textContent = '群启停失败：' + error.message;
+    } finally {
+      toggle.disabled = false;
+    }
+  }
+
   async function load(fill = true) {
-    try { show(await client.request('/api/v1/integrations/qq'), fill); }
+    try {
+      show(await client.request('/api/v1/integrations/qq'), fill);
+      await loadGroups();
+    }
     catch (error) { $('#qq-status').textContent = '读取失败：' + error.message; }
   }
 
@@ -64,6 +133,7 @@ export function createQQPage(client, getConversation) {
       $('#qq-hint').textContent = body.group_enabled
         ? '已保存。只有填写过的群会接入；群成员使用独立成员记忆，不会写入主人池。'
         : '已保存。群聊保持关闭。';
+      await loadGroups();
     } catch (error) { $('#qq-hint').textContent = '保存失败：' + error.message; }
     finally { button.disabled = false; }
   });

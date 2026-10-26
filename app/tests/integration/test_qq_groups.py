@@ -1,12 +1,14 @@
 import time
 from uuid import uuid4
 
+import httpx
 import pytest
 from test_client import client_app
 
 from agi_wind.archive import models as m
 from agi_wind.archive.deletions import DeletionLedger
 from agi_wind.integrations.qq import QQSettings, TOKEN_REF
+from agi_wind.integrations.qq_groups import ensure_group_binding
 from agi_wind.providers.protocol import ProviderChunk
 
 BOT = "334193096"
@@ -217,3 +219,36 @@ async def test_group_reply_channel_and_member_identity_survive_restart(db, actor
     assert len([row for row in db.all("conversations") if row["channel_kind"] == "group"]) == 1
     assert db.count("external_principals") == 1
     assert db.count("requests") == 2
+
+
+async def test_per_group_toggle_updates_allowlist_binding_and_listing(db, actor, seeded_scope, tmp_path):
+    provider = Provider()
+    app = client_app(db, actor, tmp_path, provider)
+    app.state.service.memory_extraction_enabled = False
+    app.state.settings.memory_extraction_enabled = False
+    app.state.settings.memory_maintenance_enabled = False
+    configure(app, seeded_scope, provider)
+    binding = ensure_group_binding(db, actor, companion_id=seeded_scope.companion_id,
+                                   bot_qq=BOT, group_id=GROUP, title="测试群")
+    headers = {"Authorization": "Bearer synthetic-private-token"}
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        disabled = await client.patch(f"/api/v1/integrations/qq/groups/{binding['id']}",
+                                      json={"enabled": False}, headers=headers)
+        assert disabled.status_code == 200, disabled.text
+        assert disabled.json()["allowed_groups"] == []
+        assert app.state.settings.qq.allowed_groups == []
+        assert db.all("channel_bindings", id=binding["id"])[0]["enabled"] is False
+        rooms = (await client.get("/api/v1/integrations/qq/groups", params={
+            "companion_id": str(seeded_scope.companion_id)}, headers=headers)).json()
+        assert rooms[0]["enabled"] is False
+        enabled = await client.patch(f"/api/v1/integrations/qq/groups/{binding['id']}",
+                                     json={"enabled": True}, headers=headers)
+        assert enabled.status_code == 200
+        assert GROUP in enabled.json()["allowed_groups"]
+        assert db.all("channel_bindings", id=binding["id"])[0]["enabled"] is True
+        rooms = (await client.get("/api/v1/integrations/qq/groups", params={
+            "companion_id": str(seeded_scope.companion_id)}, headers=headers)).json()
+        assert rooms[0]["enabled"] is True
+        missing = await client.patch(f"/api/v1/integrations/qq/groups/{uuid4()}",
+                                     json={"enabled": False}, headers=headers)
+        assert missing.status_code == 404

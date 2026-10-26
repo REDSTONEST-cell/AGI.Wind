@@ -11,12 +11,28 @@ from .search import WebSearch
 from .tools import StationTools
 
 
+def agent_execution_policy(settings, scope):
+    """A group member never inherits the owner's local file/command/admin capability.
+
+    Tool access is still governed by the global Agent settings for private scenes; a
+    group scene can only ever use non-local tools (memory/sticker/web), even when the
+    owner enabled full file or command access for the private window.
+    """
+    policy = settings().model_copy(deep=True)
+    group_scene = getattr(scope, 'scene', 'owner_private') == 'group'
+    if group_scene:
+        policy.file_access_mode = 'disabled'
+        policy.command_access_mode = 'disabled'
+    return policy, not group_scene
+
+
 async def run_agent(service, generation_id, scope, generation, provider, model, messages):
     settings = service.agent_settings
-    policy = settings().model_copy(deep=True)
+    policy, local_tools_allowed = agent_execution_policy(settings, scope)
 
     async def check():
         if not settings().enabled: raise AppError('AGENT_DISABLED', 'Agent 能力已关闭，已停止本轮工具执行', 409)
+        # Group scenes still require the global Agent switch, but never gain local tools.
         with service.db.engine.begin() as conn:
             lock(conn, scope.companion_id)
             authorize(conn, scope, scope.companion_id)
@@ -75,7 +91,7 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
     search = WebSearch(policy, getattr(service, 'agent_secret_store', None))
     tools = StationTools(service.db, scope, settings, search, send)
     specs = tools.specs()
-    if getattr(service, 'agent_approvals', None) is not None:
+    if local_tools_allowed and getattr(service, 'agent_approvals', None) is not None:
         from .files import FileTools
         files = FileTools(service.agent_data_dir, settings, service.agent_approvals, scope, generation_id, check)
         specs += files.specs()

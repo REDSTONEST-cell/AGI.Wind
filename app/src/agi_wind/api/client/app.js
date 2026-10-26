@@ -5,12 +5,19 @@ import { splitReply } from './reply-segments.js?v=20261027a';
 import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027b';
 import { createAgentPage } from './agent-settings.js?v=20261027e';
 import { createRealtimeCall } from './realtime-call.js?v=20261026-call3';
-import { createQQPage } from './qq-settings.js?v=20261027qqgroup1';
+import { createQQPage } from './qq-settings.js?v=20261027qqgroup2';
 
 const client = new AgiWindClient();
 let realtimeCall;
 const agentPage = createAgentPage(client);
-const qqPage = createQQPage(client, () => state.conversation);
+const qqPage = createQQPage(client, () => state.conversation, async (conversationId) => {
+  try {
+    const rows = await client.conversations(state.companionId, 'active');
+    const conversation = rows.find(row => String(row.id) === String(conversationId));
+    if (!conversation) { toast('这个群窗口已归档或删除。'); return; }
+    await switchChatWindow(conversation);
+  } catch (error) { toast('打开群窗口失败：' + error.message); }
+});
 const DEFAULT_KEY = '123456';
 const SERVER_STORAGE = 'agiwind-server';
 const MODEL_TABS = [
