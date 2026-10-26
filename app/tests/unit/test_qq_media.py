@@ -64,12 +64,16 @@ async def test_reply_sends_voice_instead_of_repeating_text(tmp_path):
     # 语音段只发 record，不再重复发文字；表情包照发
     assert [item['type'] for item in parts] == ['record', 'image']
     assert parts[0]['data']['file'] == 'base64://' + base64.b64encode(b'media').decode()
-    # 混合段保持顺序：文字段发文字，语音段发语音
+    # 混音段保持顺序：文字段发文字，语音段发语音
     mixed = await bridge._reply_parts({'text': '一。二。', 'segments': [
         {'index': 0, 'kind': 'text', 'text': '一'},
         {'index': 1, 'kind': 'voice', 'text': '二', 'segment_id': segment_id}],
         'attachments': [{'kind': 'audio', 'asset_id': str(audio_id), 'segment_id': segment_id}]})
     assert [item['type'] for item in mixed] == ['text', 'record']
+    # 表情包附件（kind=sticker）作为图片发出
+    sticker_parts = await bridge._reply_parts({'text': '', 'attachments': [
+        {'kind': 'sticker', 'asset_id': str(image_id)}]})
+    assert [item['type'] for item in sticker_parts] == ['image']
     # 语音没合成好时回退文字
     fallback = await bridge._reply_parts({'text': '文字保留。', 'segments': [
         {'index': 0, 'kind': 'voice', 'text': '文字保留', 'segment_id': str(uuid4())}]})

@@ -467,6 +467,7 @@ class QQBridge:
 
     async def _media_part(self, item):
         kind=item.get('kind')
+        if kind=='sticker': kind='image'  # sticker attachments are image assets sent as QQ images
         if kind not in ('image','audio'): return None
         try:
             asset,path=self.assets.get(self.actor,UUID(item['asset_id']))
