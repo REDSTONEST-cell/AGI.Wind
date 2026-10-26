@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-10-25T01:44:09Z",
-  "updated_at": "2026-10-26T15:55:46Z",
+  "updated_at": "2026-10-26T23:29:40Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -311,9 +311,9 @@
     },
     "app/src/agi_wind/api/client/reply-segments.js": {
       "role": "index",
-      "sha256": "afdeae26d5edc0fc87e2aee614717ad18ac5d999d2121842359e5a1c61426e10",
-      "size": 740,
-      "normalized_sha256": "afdeae26d5edc0fc87e2aee614717ad18ac5d999d2121842359e5a1c61426e10"
+      "sha256": "e26d173e9fb63129a9dc60d7587a79fe78fa2de12d46de890036a21cfa56314e",
+      "size": 739,
+      "normalized_sha256": "e26d173e9fb63129a9dc60d7587a79fe78fa2de12d46de890036a21cfa56314e"
     },
     "app/src/agi_wind/api/client/sdk/api.js": {
       "role": "index",
@@ -449,9 +449,9 @@
     },
     "app/src/agi_wind/delivery/segments.py": {
       "role": "index",
-      "sha256": "ad7aa40a6495d11ccc462b33a8a202ab384d31e6621122d764251b90e2ebf361",
-      "size": 2450,
-      "normalized_sha256": "ad7aa40a6495d11ccc462b33a8a202ab384d31e6621122d764251b90e2ebf361"
+      "sha256": "d93ac817cae056f8903faa281168efd98042aaf8780102f7c3c6e79a3a6de224",
+      "size": 2449,
+      "normalized_sha256": "d93ac817cae056f8903faa281168efd98042aaf8780102f7c3c6e79a3a6de224"
     },
     "app/src/agi_wind/delivery/service.py": {
       "role": "index",
