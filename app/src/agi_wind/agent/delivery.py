@@ -10,6 +10,12 @@ from .runner import AgentRunner
 from .search import WebSearch
 from .tools import StationTools
 
+# Stickers are an occasional impulse, not a per-turn routine: the sticker tools are
+# offered only on a dice roll (or when the user explicitly asks for one), then the
+# model itself decides whether to actually send.
+STICKER_TURN_CHANCE = 0.3
+STICKER_ASK_WORDS = ('表情包', '发个图', '发张图', '发图', '斗图', '整个图')
+
 
 def agent_execution_policy(settings, scope):
     """A group member never inherits the owner's local file/command/admin capability.
@@ -98,5 +104,10 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
         from .commands import CommandTools
         commands = CommandTools(service.agent_data_dir, settings, service.agent_approvals, scope, generation_id, check)
         specs += commands.specs()
+    with service.db.engine.connect() as conn:
+        request_input = conn.scalar(select(m.requests.c.input).where(m.requests.c.id == generation['request_id'])) or {}
+    asked = any(word in str((request_input or {}).get('text') or '') for word in STICKER_ASK_WORDS)
+    if not asked and service.random_value() >= STICKER_TURN_CHANCE:
+        specs = [spec for spec in specs if spec.name not in ('search_stickers', 'send_sticker')]
     result = await AgentRunner(policy, specs, on_event=trace, on_reasoning=reasoning, check_current=check).run(provider, model, messages)
     return result.text
