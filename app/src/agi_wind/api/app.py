@@ -34,6 +34,8 @@ from ..memory.corrections import CorrectionService
 from ..memory.extraction import Extractor
 from ..memory.jobs import MEMORY_EXTRACT, enqueue_manual_extraction, run_extraction
 from ..memory.lifecycle import maintain as maintain_memories
+from ..memory.consolidation import MEMORY_CONSOLIDATE, enqueue_consolidation, run_consolidation, SUMMARY_PROMPT
+from ..memory.budget import MemoryBudget
 from ..delivery.service import GenerationService,generation_scope,TERMINAL
 from ..delivery.proactive import ProactiveService
 from ..delivery.stream import encode_sse
@@ -71,7 +73,12 @@ class CorrectionRequest(DTO): memory_id:UUID; correction_text:str; source_event_
 class MemoryItemPatch(DTO):
     status:Literal["active","hidden"]|None=None
     importance:float|None=Field(default=None,ge=0,le=1)
+    is_pinned:bool|None=None
+    ttl_days:float|None=Field(default=None,ge=1,le=3650)
 class MemoryExtractionRequest(DTO): companion_id:UUID
+class MemorySummaryRequest(DTO):
+    companion_id:UUID
+    level:Literal['daily','weekly']='daily'
 class RecallTestRequest(DTO): companion_id:UUID; query:str=Field(min_length=1,max_length=500)
 class MemorySettingsPatch(DTO):
     extraction_enabled:bool|None=None
@@ -80,6 +87,15 @@ class MemorySettingsPatch(DTO):
     timeout_seconds:float|None=Field(default=None,gt=0,le=300)
     maintenance_enabled:bool|None=None
     maintenance_hours:float|None=Field(default=None,gt=0,le=720)
+    semantic_enabled:bool|None=None
+    retention_days:dict[str,float]|None=None
+    daily_budget_usd:float|None=Field(default=None,ge=0,le=100)
+    daily_token_limit:int|None=Field(default=None,ge=0,le=100_000_000)
+    input_price_per_million:float|None=Field(default=None,ge=0,le=1000)
+    output_price_per_million:float|None=Field(default=None,ge=0,le=1000)
+    max_output_tokens:int|None=Field(default=None,ge=256,le=8192)
+    consolidation_enabled:bool|None=None
+    worker_mode:Literal['gateway','separate']|None=None
 class VoiceSettingsPatch(DTO):
     enabled:bool|None=None
     base_url:str|None=Field(default=None,max_length=2000)
@@ -167,7 +183,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             return None
 
     authenticate_bearer=bearer_auth(settings,actor)
-    sessions=BrowserSessions()
+    sessions=BrowserSessions(persist_path=settings.data_dir/"browser-sessions.json")
     key_attempts=defaultdict(deque)
     client_dir=Path(__file__).with_name("client")
 
@@ -236,10 +252,16 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                 if job["event_type"]==MEMORY_EXTRACT:
                     # Extraction is async and budgeted; failure only retries this job and never
                     # touches the already archived chat turn.
-                    return await run_extraction(db,getattr(service,"memory_extractor",None),worker,job,batch_events=settings.memory_extract_batch_events)
+                    return await run_extraction(db,getattr(service,"memory_extractor",None),worker,job,batch_events=settings.memory_extract_batch_events,settings=settings)
+                if job['event_type'] == MEMORY_CONSOLIDATE:
+                    return await run_consolidation(db,getattr(service,'memory_summary_extractor',None),worker,job,settings=settings)
                 raise AppError("HANDLER_UNCONFIGURED","任务处理器未配置",503)
             while not closing.is_set():
-                jobs=worker.claim("gateway",batch_size=4)
+                event_types=['generation.requested']
+                if settings.memory_worker_mode == 'gateway':
+                    if settings.memory_extraction_enabled: event_types.append(MEMORY_EXTRACT)
+                    if settings.memory_consolidation_enabled: event_types.append(MEMORY_CONSOLIDATE)
+                jobs=worker.claim("gateway",batch_size=4,event_types=event_types)
                 if jobs:
                     for job in jobs:
                         if closing.is_set(): break
@@ -250,17 +272,17 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                     except TimeoutError: pass
         task=asyncio.create_task(loop())
         async def memory_maintenance_loop():
+            background_state={}
             while not closing.is_set():
-                if settings.memory_maintenance_enabled:
+                if settings.memory_worker_mode == 'gateway':
                     try:
-                        await asyncio.to_thread(maintain_memories,db)
+                        from ..memory.runtime import background_tick
+                        await background_tick(db,settings,actor,background_state)
+                        wakeup.set()
                     except Exception:
                         logger.warning("memory lifecycle maintenance failed",exc_info=True)
-                    timeout=settings.memory_maintenance_hours*3600
-                else:
-                    timeout=300
                 try:
-                    await asyncio.wait_for(closing.wait(),timeout=timeout)
+                    await asyncio.wait_for(closing.wait(),timeout=30)
                 except TimeoutError:
                     pass
         maintenance_task=asyncio.create_task(memory_maintenance_loop())
@@ -301,6 +323,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     app.state.proactive=proactive
     app.state.browser_sessions=sessions
     app.state.settings=settings
+    db.memory_settings=settings
+    app.state.actor=actor
     app.state.settings_store=store
     app.mount("/client",StaticFiles(directory=client_dir),name="client")
 
@@ -325,7 +349,15 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         callback=getattr(app.state,"apply_settings",None)
         if callback is not None: callback()
 
+    def embedding_status():
+        try:
+            from ..memory.semantic import semantic_status
+            return semantic_status(db)
+        except ImportError:
+            return 'keyword_only'
+
     def memory_settings_view():
+        from ..memory.runtime import worker_status
         return {
             "extraction_enabled": settings.memory_extraction_enabled,
             "batch_events": settings.memory_extract_batch_events,
@@ -334,7 +366,18 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             "maintenance_enabled": settings.memory_maintenance_enabled,
             "maintenance_hours": settings.memory_maintenance_hours,
             "extractor": getattr(app.state,"memory_extractor_source","unconfigured"),
-            "embedding": "configured_adapter_pending" if settings.models.embedding and settings.models.embedding.provider_id != "local" else "keyword_only",
+            'embedding': embedding_status(),
+            'semantic_enabled':settings.memory_semantic_enabled,
+            'retention_days':settings.memory_retention_days,
+            'daily_budget_usd':settings.memory_daily_budget_usd,
+            'daily_token_limit':settings.memory_daily_token_limit,
+            'input_price_per_million':settings.memory_input_price_per_million,
+            'output_price_per_million':settings.memory_output_price_per_million,
+            'max_output_tokens':settings.memory_extract_max_output_tokens,
+            'consolidation_enabled':settings.memory_consolidation_enabled,
+            'worker_mode':settings.memory_worker_mode,
+            'worker':worker_status(settings),
+            'budget':MemoryBudget(db,settings).stats(actor.account_id),
         }
 
     async def voice_settings_view(force_voices=False):
@@ -476,7 +519,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         if getattr(voice,"enabled",False):
             try: tts_state="available" if (await voice.health()).get("available") else "unavailable"
             except Exception: tts_state="unavailable"
-        dependencies={"database":database,"assets":"available" if assets.root.is_dir() else "unavailable","dialogue":dialogue,"runtime":service.runtime_name,"memory_extraction":getattr(app.state,"memory_extractor_source","unconfigured"),"tts":tts_state,"asr":"unconfigured","embedding":"keyword_only","letta":"not_verified"}
+        dependencies={"database":database,"assets":"available" if assets.root.is_dir() else "unavailable","dialogue":dialogue,"runtime":service.runtime_name,"memory_extraction":getattr(app.state,"memory_extractor_source","unconfigured"),"tts":tts_state,"asr":"unconfigured","embedding":embedding_status(),"letta":"not_verified"}
         usable=database=="available" and dialogue=="configured"
         return JSONResponse({"status":"ready" if usable else "degraded","dependencies":dependencies},status_code=200 if usable else 503)
 
@@ -486,12 +529,13 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         if getattr(voice,"enabled",False):
             try: tts=bool((await voice.health()).get("available"))
             except Exception: tts=False
-        return {"protocol_version":"1.0","text":service.provider is not None,"image":service.vision is not None,"streaming":True,"tts":tts,"asr":False,"live2d":False,"runtime":service.runtime_name,"embedding":"keyword_only","memory_extraction":getattr(app.state,"memory_extractor_source","unconfigured"),"voice_training":"ready" if tts else "unconfigured","voice_id":settings.voice.voice_id if tts else None,"archive_format_version":3}
+        return {"protocol_version":"1.0","text":service.provider is not None,"image":service.vision is not None,"streaming":True,"tts":tts,"asr":bool((await app.state.asr_health()).get('available')),"live2d":False,"runtime":service.runtime_name,"embedding":embedding_status(),"memory_extraction":getattr(app.state,"memory_extractor_source","unconfigured"),"voice_training":"ready" if tts else "unconfigured","voice_id":settings.voice.voice_id if tts else None,"archive_format_version":3}
 
     @app.get("/api/v1/system-logs")
     def system_logs(tail:int=Query(default=300,ge=1,le=1000),stdout_offset:int|None=Query(default=None,ge=0),stderr_offset:int|None=Query(default=None,ge=0),current=Depends(authenticate)):
         """Tail the gateway console logs for the browser's terminal drawer."""
         return log_reader.read(tail=tail,stdout_offset=stdout_offset,stderr_offset=stderr_offset,secrets=log_secrets())
+
 
     @app.get("/api/v1/settings/providers")
     def list_providers(current=Depends(authenticate)):
@@ -607,7 +651,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     @app.post("/api/v1/chat/requests",status_code=202)
     async def chat(body:ChatRequest,current=Depends(authenticate)):
-        accepted=await service.submit(current,body)
+        accepted=await app.state.submit_call_chat(current,body) if body.output.realtime else await service.submit(current,body)
         wakeup.set()
         return accepted
 
@@ -636,10 +680,10 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                     cursor=event.sequence
                     yield encode_sse(event)
                 with db.engine.connect() as conn:
-                    generation,_,_=generation_scope(conn,generation_id,current)
+                    generation,request,_=generation_scope(conn,generation_id,current)
                 if generation["state"] in TERMINAL: break
                 if not batch: yield ": heartbeat\n\n"
-                await asyncio.sleep(0.25)
+                await asyncio.sleep(0.05 if request['output'].get('realtime') else 0.25)
         return StreamingResponse(frames(),media_type="text/event-stream",headers={"Cache-Control":"no-store","X-Accel-Buffering":"no"})
 
     @app.delete("/api/v1/conversations/{conversation_id}")
@@ -744,7 +788,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     @app.post("/api/v1/memory/corrections")
     async def correct(body:CorrectionRequest,current=Depends(authenticate)):
-        return await CorrectionService(db).apply_correction(current,body.memory_id,body.correction_text,body.source_event_id)
+        return await CorrectionService(db,retention_days=settings.memory_retention_days).apply_correction(current,body.memory_id,body.correction_text,body.source_event_id)
 
     @app.get("/api/v1/memory/items")
     def memory_items(companion_id:UUID,q:str|None=Query(default=None,max_length=200),kind:str|None=Query(default=None,max_length=40),status:str|None=Query(default=None,max_length=40),sort:Literal["created","importance","expiry"]=Query(default="created"),limit:int=Query(default=50,ge=1,le=200),current=Depends(authenticate)):
@@ -758,9 +802,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     @app.patch("/api/v1/memory/items/{memory_id}")
     def update_memory_item(memory_id:UUID,body:MemoryItemPatch,current=Depends(authenticate)):
-        if body.status is None and body.importance is None:
-            raise AppError("INVALID_PATCH","至少提供 status 或 importance",422)
-        return MemoryService(db).update_item(current,memory_id,status=body.status,importance=body.importance)
+        if all(value is None for value in (body.status,body.importance,body.is_pinned,body.ttl_days)):
+            raise AppError("INVALID_PATCH","至少提供一项记忆修改",422)
+        return MemoryService(db).update_item(current,memory_id,status=body.status,importance=body.importance,is_pinned=body.is_pinned,ttl_days=body.ttl_days)
 
     @app.post("/api/v1/memory/recall-test")
     async def recall_test(body:RecallTestRequest,current=Depends(authenticate)):
@@ -775,7 +819,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     def memory_maintenance(body:MemoryExtractionRequest,current=Depends(authenticate)):
         with db.engine.begin() as conn:
             authorize(conn,current,body.companion_id)
-        return maintain_memories(db,body.companion_id)
+        return maintain_memories(db,body.companion_id,retention_days=settings.memory_retention_days)
 
     @app.get("/api/v1/memory/stats")
     def memory_stats(companion_id:UUID,current=Depends(authenticate)):
@@ -789,24 +833,46 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     @app.patch("/api/v1/memory/settings")
     def update_memory_settings(body:MemorySettingsPatch,current=Depends(authenticate)):
-        if body.extraction_enabled is not None: settings.memory_extraction_enabled=body.extraction_enabled
         with SETTINGS_WRITE_LOCK:
-            if body.batch_events is not None: settings.memory_extract_batch_events=body.batch_events
-            if body.max_candidates is not None: settings.memory_extract_max_candidates=body.max_candidates
-            if body.timeout_seconds is not None: settings.memory_extract_timeout_seconds=body.timeout_seconds
-            if body.maintenance_enabled is not None: settings.memory_maintenance_enabled=body.maintenance_enabled
-            if body.maintenance_hours is not None: settings.memory_maintenance_hours=body.maintenance_hours
+            aliases={'batch_events':'extract_batch_events','max_candidates':'extract_max_candidates',
+                'timeout_seconds':'extract_timeout_seconds','max_output_tokens':'extract_max_output_tokens'}
+            updates={'memory_' + aliases.get(key,key):value for key,value in body.model_dump(exclude_none=True).items()}
+            try:
+                validated=Settings.model_validate({**settings.model_dump(),**updates})
+            except ValueError:
+                raise AppError('INVALID_MEMORY_SETTINGS','记忆设置无效：保留期需使用已知类型及1到3650天',422) from None
+            for key in updates: setattr(settings,key,getattr(validated,key))
             service.memory_extraction_enabled=settings.memory_extraction_enabled
             persist_settings(settings)
+            if any(key in updates for key in ('memory_daily_budget_usd','memory_daily_token_limit','memory_input_price_per_million','memory_output_price_per_million')):
+                with db.engine.begin() as conn:
+                    conn.execute(m.outbox.update().where(m.outbox.c.event_type.in_([MEMORY_EXTRACT,MEMORY_CONSOLIDATE]),
+                        m.outbox.c.state=='pending',m.outbox.c.payload['account_id'].astext==str(current.account_id),
+                        m.outbox.c.payload['last_error_code'].astext=='MEMORY_BUDGET_EXCEEDED').values(available_at=m.now()))
         refresh_runtime()
         return memory_settings_view()
+
+    @app.post('/api/v1/memory/consolidations',status_code=201)
+    def queue_memory_summary(body:MemorySummaryRequest,current=Depends(authenticate)):
+        if not settings.memory_consolidation_enabled:
+            raise AppError('MEMORY_SUMMARY_DISABLED','摘要整理已关闭',409)
+        with db.engine.begin() as conn:
+            authorize(conn,current,body.companion_id)
+            conversation_id=conn.scalar(select(m.conversations.c.id).where(m.conversations.c.account_id==current.account_id,
+                m.conversations.c.user_id==current.user_id,m.conversations.c.companion_id==body.companion_id)
+                .order_by(m.conversations.c.created_at.desc()).limit(1))
+            if conversation_id is None: raise AppError('NO_CONVERSATION','先开始一段对话',409)
+            scope=Scope(**current.model_dump(),companion_id=body.companion_id,conversation_id=conversation_id)
+            job_id=enqueue_consolidation(conn,scope,body.level)
+        wakeup.set()
+        return {'job_id':job_id,'status':'queued' if job_id else 'noop_or_already_queued','level':body.level}
 
     @app.get("/api/v1/memory/extractions")
     def memory_extractions(companion_id:UUID,limit:int=Query(default=20,ge=1,le=100),current=Depends(authenticate)):
         with db.engine.connect() as conn:
             authorize(conn,current,companion_id)
-            rows=conn.execute(select(m.outbox).where(m.outbox.c.event_type==MEMORY_EXTRACT,m.outbox.c.aggregate_id==companion_id).order_by(m.outbox.c.created_at.desc()).limit(limit)).mappings()
-            return [{"id":row["id"],"state":row["state"],"attempts":row["attempts"],"created_at":row["created_at"],"available_at":row["available_at"],"last_error_code":(row["payload"] or {}).get("last_error_code"),"result":(row["payload"] or {}).get("result"),"usage":(row["payload"] or {}).get("usage")} for row in rows]
+            rows=conn.execute(select(m.outbox).where(m.outbox.c.event_type.in_([MEMORY_EXTRACT,MEMORY_CONSOLIDATE]),m.outbox.c.aggregate_id==companion_id).order_by(m.outbox.c.created_at.desc()).limit(limit)).mappings()
+            return [{"id":row["id"],"event_type":row['event_type'],"state":row["state"],"attempts":row["attempts"],"created_at":row["created_at"],"available_at":row["available_at"],"last_error_code":(row["payload"] or {}).get("last_error_code"),"result":(row["payload"] or {}).get("result"),"usage":(row["payload"] or {}).get("usage")} for row in rows]
 
     @app.post("/api/v1/memory/extractions",status_code=201)
     def queue_memory_extraction(body:MemoryExtractionRequest,current=Depends(authenticate)):
@@ -912,6 +978,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     from ..agent.api import install_agent_routes
     install_agent_routes(app,settings,store,service,authenticate)
+    from ..voice.call import install_call_routes
+    install_call_routes(app,settings,db,voice,authenticate)
     return app
 
 def from_env():
@@ -948,6 +1016,7 @@ def from_env():
         """Re-resolve provider clients after the client settings page edits endpoints or keys."""
         registry.invalidate_all()
         service.memory_extraction_enabled=settings.memory_extraction_enabled
+        service.memory_summary_extractor=None
         if settings.runtime.preferred!="direct_vendor":
             service.provider,service.model=None,None
             service.memory_extractor=None
@@ -971,11 +1040,22 @@ def from_env():
             extract_provider,extract_model=configured_provider(settings,"memory_extract",store.get)
             source="memory_extract"
         if settings.memory_extraction_enabled and extract_provider and extract_model:
-            service.memory_extractor=Extractor(extract_provider.complete,extract_model,max_candidates=settings.memory_extract_max_candidates,timeout=settings.memory_extract_timeout_seconds)
+            from ..memory.metering import MeteredExtractor
+            service.memory_extractor=MeteredExtractor(extract_provider,extract_model,max_candidates=settings.memory_extract_max_candidates,timeout=settings.memory_extract_timeout_seconds,max_output_tokens=settings.memory_extract_max_output_tokens)
             app.state.memory_extractor_source=source
         else:
             service.memory_extractor=None
             app.state.memory_extractor_source="unconfigured"
+
+        summary_provider,summary_model=extract_provider,extract_model
+        if settings.models.memory_reflect is not None:
+            summary_provider,summary_model=configured_provider(settings,'memory_reflect',store.get)
+        service.memory_summary_extractor=None
+        if settings.memory_consolidation_enabled and summary_provider and summary_model:
+            from ..memory.metering import MeteredExtractor
+            service.memory_summary_extractor=MeteredExtractor(summary_provider,summary_model,max_candidates=2,
+                timeout=settings.memory_extract_timeout_seconds,max_output_tokens=settings.memory_extract_max_output_tokens,
+                system_prompt=SUMMARY_PROMPT)
 
     app=create_app(settings,db,actor,service,settings_store=store)
     app.state.apply_settings=apply_settings

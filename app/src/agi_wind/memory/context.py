@@ -3,10 +3,12 @@ from collections import Counter
 from sqlalchemy import select
 from .chunking import estimate_tokens
 from .retrieval import MemoryService
+from .semantic import active_clause, item_scope, verified_refs, chunk_query, chunk_valid
+from . import models as mm
 from ..identity.service import IdentityService, authorize
 from ..archive import models as m
 from ..archive.repository import lock
-from ..core.types import ContextBundle
+from ..core.types import ContextBundle, SourceRef
 from ..core.errors import AppError
 
 
@@ -22,6 +24,7 @@ def check_current_input(text, token_count=estimate_tokens, budget=DEFAULT_INPUT_
 def select_memories(hits, token_count=estimate_tokens, budget=3000):
     selected, counts, used = [], Counter(), 0
     for hit in hits:
+        if hit.status != "active": continue
         ids = {ref.event_id for ref in hit.source_refs}
         cost = token_count(hit.content)
         if not ids or any(counts[key] >= 2 for key in ids) or used + cost > budget: continue
@@ -70,7 +73,27 @@ class ContextBuilder:
             if identity.version != companion["active_persona_version"] or initial_revision!=companion["memory_revision"]:
                 raise AppError("STALE_CONTEXT", "人格已变化，请重试", 409)
             # Sources are rechecked while the same scope write lock is held.
-            valid_ids = set(conn.scalars(select(m.events.c.id).where(m.events.c.account_id == scope.account_id, m.events.c.companion_id == scope.companion_id, m.events.c.visibility == "visible")))
-            selected = [hit for hit in selected if all(ref.event_id in valid_ids for ref in hit.source_refs)]
+            selected_memory_ids = [hit.memory_id for hit in selected if hit.memory_id]
+            current_memories = list(conn.execute(select(mm.memory_items).where(item_scope(scope), active_clause(),
+                mm.memory_items.c.id.in_(selected_memory_ids))).mappings())
+            current_refs = verified_refs(conn, scope, current_memories)
+            current_contents = {row["id"]:row["content"] for row in current_memories if row["id"] in current_refs}
+            current_chunks = {row["id"]:row for row in conn.execute(chunk_query(scope).where(
+                mm.retrieval_chunks.c.id.in_([hit.chunk_id for hit in selected if hit.chunk_id]))).mappings() if chunk_valid(row)}
+            selected = [hit for hit in selected if hit.status == "active" and
+                        (current_contents.get(hit.memory_id) == hit.content if hit.memory_id else
+                         hit.chunk_id in current_chunks and current_chunks[hit.chunk_id]["content"] == hit.content)]
+            # Refresh attribution from the same locked snapshot. A memory may have
+            # gained/lost references since ranking without changing its wording.
+            for hit in selected:
+                if hit.memory_id:
+                    hit.source_refs = [SourceRef(**{key:ref[key] for key in
+                        ("event_id","json_pointer","start_offset","end_offset","quote_hash")})
+                        for ref in current_refs[hit.memory_id]]
+                else:
+                    row = current_chunks[hit.chunk_id]
+                    import hashlib
+                    hit.source_refs = [SourceRef(event_id=row["source_id"],start_offset=row["start_offset"],
+                        end_offset=row["end_offset"],quote_hash=hashlib.sha256(row["content"].encode()).hexdigest())]
             memory.touch(conn, [hit.memory_id for hit in selected if hit.memory_id])
             return ContextBundle(memory_revision=companion["memory_revision"], persona_snapshot=identity, recent_events=list(reversed(recent)), memories=selected, current_input=current_input, vision_observations=[], token_estimate=used, selected_source_ids=list({ref.event_id for hit in selected for ref in hit.source_refs}))

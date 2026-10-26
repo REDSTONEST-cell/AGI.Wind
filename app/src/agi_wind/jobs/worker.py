@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import random
 from sqlalchemy import select, or_, and_
 from ..archive.models import outbox, now
@@ -8,9 +8,11 @@ from ..core.errors import AppError
 class Worker:
     def __init__(self, db, jitter=random.random): self.db, self.jitter = db, jitter
 
-    def claim(self, worker_id, lease_seconds=120, batch_size=4):
+    def claim(self, worker_id, lease_seconds=120, batch_size=4, event_types=None):
         with self.db.engine.begin() as conn:
             query = select(outbox).where(outbox.c.attempts < 5, or_(and_(outbox.c.state=="pending",outbox.c.available_at<=now()),and_(outbox.c.state=="running",outbox.c.lease_until<now()))).order_by(outbox.c.available_at, outbox.c.created_at).with_for_update(skip_locked=True).limit(batch_size)
+            if event_types is not None:
+                query = query.where(outbox.c.event_type.in_(event_types))
             rows = list(conn.execute(query).mappings())
             return [dict(conn.execute(outbox.update().where(outbox.c.id==row["id"]).values(state="running",worker_id=worker_id,attempts=row["attempts"]+1,lease_until=now()+timedelta(seconds=lease_seconds)).returning(outbox)).mappings().one()) for row in rows]
 
@@ -38,6 +40,15 @@ class Worker:
             delay = min(300,5*2**(row["attempts"]-1)) + self.jitter()
             conn.execute(outbox.update().where(outbox.c.id==job_id).values(state="failed" if row["attempts"]>=5 else "pending",lease_until=None,available_at=now()+timedelta(seconds=delay),payload={**row["payload"],"last_error_code":code}))
 
+    def defer_budget(self, job_id, worker_id):
+        tomorrow = datetime.now(timezone.utc).date() + timedelta(days=1)
+        until = datetime.combine(tomorrow, datetime.min.time(), timezone.utc)
+        with self.db.engine.begin() as conn:
+            row = self.owned(conn, job_id, worker_id)
+            conn.execute(outbox.update().where(outbox.c.id == job_id).values(state='pending',
+                worker_id=None, lease_until=None, available_at=until, attempts=max(0, row['attempts'] - 1),
+                payload={**row['payload'], 'last_error_code':'MEMORY_BUDGET_EXCEEDED'}))
+
     async def run_job(self, job_id, worker_id, handler):
         with self.db.engine.begin() as conn: job = dict(self.owned(conn,job_id,worker_id))
         stop = asyncio.Event()
@@ -55,6 +66,9 @@ class Worker:
             # A lease lost while the handler was running is not a job failure to record; the
             # new owner will retry it. Calling fail() here would itself raise LEASE_LOST.
             if error.code=="LEASE_LOST": return {"state":"lease_lost"}
+            if error.code == 'MEMORY_BUDGET_EXCEEDED':
+                self.defer_budget(job_id, worker_id)
+                return {'state':'deferred', 'code':error.code}
             self.fail(job_id,worker_id,error.code)
             return {"state":"retry_or_failed","code":error.code}
         except Exception as error:

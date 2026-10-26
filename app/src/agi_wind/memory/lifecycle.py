@@ -43,8 +43,8 @@ def importance_for(kind, confidence=0.6):
     return max(0.0, min(1.0, base * (0.65 + 0.35 * max(0.0, min(1.0, float(confidence))))))
 
 
-def ttl_for(kind, importance=0.5, reinforcement_count=0):
-    base = KIND_TTL_DAYS.get(kind, KIND_TTL_DAYS["other"])
+def ttl_for(kind, importance=0.5, reinforcement_count=0, retention_days=None):
+    base = (retention_days or {}).get(kind, KIND_TTL_DAYS.get(kind, KIND_TTL_DAYS["other"]))
     importance_factor = 0.5 + max(0.0, min(1.0, float(importance)))
     reinforcement_factor = 1.0 + min(0.5, max(0, int(reinforcement_count)) * 0.1)
     return max(1.0, base * importance_factor * reinforcement_factor)
@@ -67,6 +67,8 @@ def decay_score(decay_type, ttl_days, days_since):
 
 
 def freshness(item, reference=None):
+    if item.get("is_pinned"):
+        return 1.0
     reference = reference or now_utc()
     anchor = item.get("last_accessed_at") or item.get("created_at")
     if anchor is None:
@@ -77,10 +79,10 @@ def freshness(item, reference=None):
     return decay_score(item.get("decay_type") or "exponential", item.get("ttl_days") or 30.0, days)
 
 
-def lifecycle_values(kind, confidence=0.6, reference=None):
+def lifecycle_values(kind, confidence=0.6, reference=None, retention_days=None):
     reference = reference or now_utc()
     importance = importance_for(kind, confidence)
-    ttl = ttl_for(kind, importance)
+    ttl = ttl_for(kind, importance, retention_days=retention_days)
     return {
         "importance": round(importance, 4),
         "ttl_days": round(ttl, 3),
@@ -90,10 +92,15 @@ def lifecycle_values(kind, confidence=0.6, reference=None):
     }
 
 
-def extend_after_access(item, access_count, reference=None):
+def extend_after_access(item, access_count, reference=None, retention_days=None):
     """Compute new expiry/metadata after a memory was actually injected into context."""
     reference = reference or now_utc()
-    ttl = ttl_for(item["kind"], item["importance"] or 0.5, access_count)
+    # Persisted TTL includes the policy in force when this item was written. Without
+    # an explicit new policy, access must not replace it with a default kind TTL.
+    ttl = (ttl_for(item["kind"], item["importance"] or 0.5, access_count, retention_days)
+           if retention_days and item["kind"] in retention_days else
+           float(item.get("ttl_days") or ttl_for(item["kind"], item["importance"] or 0.5))
+           * (1 + min(0.5, max(0, access_count) * 0.1)))
     current = item.get("expires_at")
     target = reference + timedelta(days=ttl)
     if current is not None and current.tzinfo is None:
@@ -102,8 +109,21 @@ def extend_after_access(item, access_count, reference=None):
         "access_count": access_count,
         "last_accessed_at": reference,
         "last_reinforced_at": reference,
-        "expires_at": max(current, target) if current else target,
+        "expires_at": None if item.get("is_pinned") else max(current, target) if current else target,
     }
+
+
+def pin_values(item, is_pinned, reference=None, retention_days=None):
+    """Policy for an explicit pin/unpin edit; caller owns authorization and revision."""
+    if is_pinned:
+        return {"is_pinned": True, "expires_at": None}
+    reference = reference or now_utc()
+    ttl = (ttl_for(item["kind"], item.get("importance") or 0.5,
+                   item.get("access_count") or 0, retention_days)
+           if retention_days and item["kind"] in retention_days else
+           float(item.get("ttl_days") or ttl_for(item["kind"], item.get("importance") or 0.5)))
+    return {"is_pinned": False, "ttl_days": round(ttl, 3),
+            "expires_at": reference + timedelta(days=ttl)}
 
 
 def scored_hit_metadata(item, reference=None):
@@ -113,12 +133,20 @@ def scored_hit_metadata(item, reference=None):
     return {"importance": importance, "freshness": round(fresh, 4), "score": round(score, 4)}
 
 
-def maintain(db, companion_id=None, reference=None):
+def maintain(db, companion_id=None, reference=None, retention_days=None):
     """Expire active memories whose TTL elapsed. Hidden/superseded rows keep their state."""
     reference = reference or now_utc()
     with db.engine.begin() as conn:
-        condition = [mm.memory_items.c.status.in_(["active", "dormant"]), mm.memory_items.c.expires_at.is_not(None), mm.memory_items.c.expires_at <= reference]
+        eligible = [mm.memory_items.c.status.in_(["active", "dormant"]), mm.memory_items.c.is_pinned.is_(False)]
         if companion_id is not None:
-            condition.append(mm.memory_items.c.companion_id == companion_id)
+            eligible.append(mm.memory_items.c.companion_id == companion_id)
+        if retention_days:
+            for item in conn.execute(select(mm.memory_items).where(*eligible, mm.memory_items.c.kind.in_(list(retention_days)))).mappings():
+                anchor = item["last_accessed_at"] or item["created_at"]
+                ttl = ttl_for(item["kind"], item["importance"] or 0.5,
+                              item["access_count"] or 0, retention_days)
+                conn.execute(update(mm.memory_items).where(mm.memory_items.c.id == item["id"]).values(
+                    ttl_days=round(ttl, 3), expires_at=anchor + timedelta(days=ttl)))
+        condition = [*eligible, mm.memory_items.c.expires_at.is_not(None), mm.memory_items.c.expires_at <= reference]
         result = conn.execute(update(mm.memory_items).where(*condition).values(status="expired", archived_at=reference))
         return {"expired": result.rowcount or 0, "checked_at": reference.isoformat()}

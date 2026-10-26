@@ -14,11 +14,11 @@ import re
 from typing import Literal
 from uuid import UUID, uuid4
 
-from pydantic import Field
-from sqlalchemy import select
+from pydantic import Field, field_validator
+from sqlalchemy import and_, or_, select, exists
 
 from . import models as mm
-from .lifecycle import extend_after_access, lifecycle_values
+from .lifecycle import extend_after_access, lifecycle_values, now_utc
 from ..archive import models as m
 from ..archive.repository import lock
 from ..identity.service import authorize
@@ -34,7 +34,7 @@ _SYSTEM_PROMPT = (
     '{"schema_version":1,"candidates":[...]}。\n'
     "每条 candidate 字段：kind（preference/fact/relationship/episode/commitment/plan/identity/other）、"
     "subject_key（例如 user:self、user:friend、companion:self）、predicate（简短属性名）、"
-    "content（不超过500字的中文陈述）、value（可空）、epistemic_type"
+    "content（不超过500字的中文陈述）、value（字符串，不适用时用空字符串）、epistemic_type"
     "（user_asserted/observed/assistant_generated/inferred/fictional）、confidence（0到1）、"
     "source_refs（1到8条，每条 {event_id, quote, relation:\"supports\"}）。\n"
     "规则：quote 必须是所给事件原文中的连续片段，用于证明该条记忆；event_id 只能用给定值，禁止编造。\n"
@@ -76,15 +76,61 @@ class ExtractedCandidate(DTO):
     confidence: float = Field(default=0.6, ge=0, le=1)
     source_refs: list[ExtractedSourceRef] = Field(min_length=1, max_length=8)
 
+    @field_validator('value',mode='before')
+    @classmethod
+    def empty_optional_value(cls,value):
+        # The original extractor contract said optional/empty. Preserve that meaning
+        # for JSON null without fabricating a semantic value or enabling slot merging.
+        return '' if value is None else value
+
 
 class ExtractionResult(DTO):
     schema_version: Literal[1] = 1
     candidates: list[ExtractedCandidate] = Field(default_factory=list)
 
 
+def _semantic_text(value):
+    # Do not remove punctuation, transliterate names, fold accents or infer aliases.
+    # ASCII casing and outside whitespace are the only identity normalization here.
+    return value.strip().translate(str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"))
+
+
+def _clear_user_change(candidate, current_rows, epistemic, value, occupied):
+    """Only source wording can authorize automatic temporal supersession.
+
+    A model-supplied `correction` relation is insufficient. Conservative lexical evidence
+    is intentional: unclear changes remain linked disputed candidates for user review.
+    """
+    if epistemic != "user_asserted":
+        return False
+    for ref in candidate.source_refs:
+        source = current_rows[ref.event_id]
+        quote = _semantic_text(ref.quote)
+        if source["role"] != "user" or value not in quote or ref.relation == "contradicts":
+            continue
+        if re.search(r"没|并未|不是|不要|别|如果|假如|假设|要是|想|考虑|可能|也许|打算|[?？]|"
+                     r"\b(?:not|never|if|suppose|might|consider|want to)\b", quote):
+            continue
+        # Bind the change verb to the proposed value, so an unrelated corrected name
+        # in the same quote cannot replace a drink preference. Generic correction
+        # wording additionally needs the old value in that same source quote.
+        direct = re.search(r"(?:改喝|改吃|改用|改叫|改为|改成|\bswitched to\s+)\s*" + re.escape(value), quote)
+        generic = (any(old["value"] in quote for old in occupied) and re.search(
+            r"更正|纠正|说错了|记错了|\b(?:no longer|instead|changed my|correction)\b", quote))
+        if direct or generic:
+            return True
+    return False
+
+
+def source_owned_clause(scope):
+    return exists(select(m.conversations.c.id).where(m.conversations.c.id == m.events.c.conversation_id,
+        m.conversations.c.account_id == scope.account_id,m.conversations.c.companion_id == scope.companion_id,
+        m.conversations.c.user_id == scope.user_id,m.conversations.c.state != 'hidden'))
+
+
 class MemoryWriter:
-    def __init__(self, db):
-        self.db = db
+    def __init__(self, db, retention_days=None):
+        self.db, self.retention_days = db, retention_days
 
     async def validate_and_store(self, scope, candidate, expected_revision):
         """Legacy single-candidate path (kept for existing tests and manual callers)."""
@@ -95,7 +141,7 @@ class MemoryWriter:
                 raise AppError("STALE_CONTEXT", "提炼任务的记忆版本已失效", 409)
             reason, source_quotes, fictional = None, [], False
             for ref in candidate.source_refs:
-                event = conn.execute(select(m.events).where(m.events.c.id == ref.event_id, m.events.c.account_id == scope.account_id, m.events.c.companion_id == scope.companion_id, m.events.c.visibility == "visible")).mappings().first()
+                event = conn.execute(select(m.events).where(m.events.c.id == ref.event_id, m.events.c.account_id == scope.account_id, m.events.c.companion_id == scope.companion_id, m.events.c.visibility == "visible", source_owned_clause(scope))).mappings().first()
                 if not event or ref.json_pointer != "/text":
                     reason = "UNVERIFIABLE_SOURCE"
                     break
@@ -122,26 +168,30 @@ class MemoryWriter:
             if existing:
                 return {"id": existing, "status": "active"}
             key = uuid4()
-            conn.execute(mm.memory_items.insert().values(id=key, account_id=scope.account_id, companion_id=scope.companion_id, user_id=scope.user_id, kind=candidate.kind, content=candidate.content, epistemic_type=kind, confidence=candidate.confidence, revision=expected_revision, **lifecycle_values(candidate.kind, candidate.confidence)))
+            conn.execute(mm.memory_items.insert().values(id=key, account_id=scope.account_id, companion_id=scope.companion_id, user_id=scope.user_id, kind=candidate.kind, content=candidate.content, epistemic_type=kind, confidence=candidate.confidence, revision=expected_revision, **lifecycle_values(candidate.kind, candidate.confidence, retention_days=self.retention_days)))
             for ref in candidate.source_refs:
                 conn.execute(mm.source_refs.insert().values(memory_id=key, **ref.model_dump()))
             return {"id": key, "status": "active"}
 
-    def commit_candidates(self, conn, scope, candidates, batch, expected_revision):
+    def commit_candidates(self, conn, scope, candidates, batch, expected_revision, *, summary_level=""):
         """Validate and store one extracted batch inside an existing transaction.
 
         The caller holds the companion advisory lock and has already verified the job lease.
         Returns a summary dictionary; exactly one ``memory_revision`` bump covers the batch.
         """
+        if summary_level not in ("", "daily", "weekly"):
+            raise ValueError("Invalid server summary level")
         companion = authorize(conn, scope, scope.companion_id)
         if companion["memory_revision"] != expected_revision:
             raise AppError("STALE_CONTEXT", "提炼任务的记忆版本已失效", 409)
         by_id = {row["id"]: row for row in batch}
         current_rows = {}
         if by_id:
-            for row in conn.execute(select(m.events).where(m.events.c.id.in_(list(by_id)), m.events.c.account_id == scope.account_id, m.events.c.companion_id == scope.companion_id, m.events.c.visibility == "visible")).mappings():
+            for row in conn.execute(select(m.events).where(m.events.c.id.in_(list(by_id)), m.events.c.account_id == scope.account_id, m.events.c.companion_id == scope.companion_id, m.events.c.visibility == "visible", source_owned_clause(scope))).mappings():
                 current_rows[row["id"]] = row
         stored = reinforced = quarantined = ignored = 0
+        provenance_changed = False
+        reference = now_utc()
         for candidate in candidates:
             reason, refs, fictional = None, [], False
             for ref in candidate.source_refs:
@@ -183,32 +233,78 @@ class MemoryWriter:
                 quarantined += 1
                 continue
             epistemic = "fictional" if fictional else candidate.epistemic_type
-            # A hidden/superseded/disputed fact must not silently come back as a new active
-            # memory just because the original source conversation is extracted again.
-            suppressed = conn.execute(select(mm.memory_items.c.id).where(mm.memory_items.c.account_id == scope.account_id, mm.memory_items.c.companion_id == scope.companion_id, mm.memory_items.c.content == candidate.content, mm.memory_items.c.kind == candidate.kind, mm.memory_items.c.status.in_(["hidden", "superseded", "disputed"]))).first()
+            subject, predicate, value = map(_semantic_text, (candidate.subject_key, candidate.predicate, candidate.value))
+            semantic = bool(subject and predicate and value)
+            scoped = [mm.memory_items.c.account_id == scope.account_id,
+                      mm.memory_items.c.companion_id == scope.companion_id,
+                      mm.memory_items.c.user_id == scope.user_id,
+                      mm.memory_items.c.summary_level == summary_level]
+            # Explicit identities take precedence over legacy exact-content matching:
+            # identical wording about two subjects must not collapse their identities.
+            exact = and_(mm.memory_items.c.content == candidate.content,
+                         mm.memory_items.c.kind == candidate.kind,
+                         or_(mm.memory_items.c.subject_key == "", mm.memory_items.c.subject_key == subject),
+                         or_(mm.memory_items.c.predicate == "", mm.memory_items.c.predicate == predicate),
+                         or_(mm.memory_items.c.value == "", mm.memory_items.c.value == value))
+            same_value = and_(mm.memory_items.c.subject_key == subject,
+                              mm.memory_items.c.predicate == predicate, mm.memory_items.c.value == value,
+                              mm.memory_items.c.epistemic_type == epistemic)
+            match = or_(exact, same_value) if semantic else exact
+            active = and_(mm.memory_items.c.status == "active",
+                          or_(mm.memory_items.c.is_pinned.is_(True), mm.memory_items.c.expires_at.is_(None),
+                              mm.memory_items.c.expires_at > reference))
+            # Inactive semantic duplicates and elapsed-but-unmaintained rows are never
+            # revived through paraphrase extraction. Explicit user edits are separate.
+            suppressed = conn.execute(select(mm.memory_items.c.id).where(*scoped, match, ~active)).first()
             if suppressed:
                 ignored += 1
                 continue
-            existing = conn.execute(select(mm.memory_items).where(mm.memory_items.c.account_id == scope.account_id, mm.memory_items.c.companion_id == scope.companion_id, mm.memory_items.c.content == candidate.content, mm.memory_items.c.kind == candidate.kind, mm.memory_items.c.epistemic_type == epistemic, mm.memory_items.c.status == "active").order_by(mm.memory_items.c.revision.desc())).mappings().first()
+            existing = conn.execute(select(mm.memory_items).where(*scoped, match,
+                mm.memory_items.c.epistemic_type == epistemic, active).order_by(mm.memory_items.c.revision.desc())).mappings().first()
             if existing:
+                semantic_updates = {name: val for name, val in
+                    (("subject_key", subject), ("predicate", predicate), ("value", value))
+                    if val and not existing[name]}
+                if semantic_updates:
+                    provenance_changed = True
                 for ref in refs:
                     duplicate = conn.execute(select(mm.source_refs.c.id).where(mm.source_refs.c.memory_id == existing["id"], mm.source_refs.c.event_id == ref["event_id"], mm.source_refs.c.start_offset == ref["start_offset"], mm.source_refs.c.end_offset == ref["end_offset"])).first()
                     if not duplicate:
                         conn.execute(mm.source_refs.insert().values(memory_id=existing["id"], **ref))
+                        provenance_changed = True
                 reinforced += 1
                 conn.execute(mm.memory_items.update().where(mm.memory_items.c.id == existing["id"]).values(
                     importance=min(1.0, float(existing["importance"] or 0.5) + 0.03),
                     last_reinforced_at=m.now(),
-                    expires_at=extend_after_access(existing, int(existing["access_count"] or 0)).get("expires_at"),
+                    expires_at=extend_after_access(existing, int(existing["access_count"] or 0), retention_days=self.retention_days).get("expires_at"),
+                    **semantic_updates,
                 ))
             else:
                 memory_id = uuid4()
-                conn.execute(mm.memory_items.insert().values(id=memory_id, account_id=scope.account_id, companion_id=scope.companion_id, user_id=scope.user_id, kind=candidate.kind, content=candidate.content, epistemic_type=epistemic, confidence=candidate.confidence, status="active", revision=expected_revision, **lifecycle_values(candidate.kind, candidate.confidence)))
+                valid_from = max(current_rows[ref.event_id]["recorded_at"] for ref in candidate.source_refs)
+                occupied = []
+                if semantic and not summary_level:
+                    occupied = list(conn.execute(select(mm.memory_items).where(*scoped, active,
+                        mm.memory_items.c.subject_key == subject, mm.memory_items.c.predicate == predicate,
+                        mm.memory_items.c.value != "", mm.memory_items.c.value != value,
+                        mm.memory_items.c.epistemic_type == "user_asserted")).mappings())
+                can_supersede = (occupied and _clear_user_change(candidate, current_rows, epistemic, value, occupied)
+                                 and all(not old["valid_from"] or valid_from > old["valid_from"] for old in occupied))
+                status = "disputed" if occupied and not can_supersede else "active"
+                conn.execute(mm.memory_items.insert().values(id=memory_id, account_id=scope.account_id, companion_id=scope.companion_id, user_id=scope.user_id, kind=candidate.kind, content=candidate.content, epistemic_type=epistemic, confidence=candidate.confidence, status=status, revision=expected_revision + 1,
+                    subject_key=subject, predicate=predicate, value=value, valid_from=valid_from,
+                    summary_level=summary_level, **lifecycle_values(candidate.kind, candidate.confidence, retention_days=self.retention_days)))
                 for ref in refs:
                     conn.execute(mm.source_refs.insert().values(memory_id=memory_id, **ref))
+                for old in occupied:
+                    if can_supersede:
+                        conn.execute(mm.memory_items.update().where(mm.memory_items.c.id == old["id"]).values(
+                            status="superseded", valid_to=valid_from, archived_at=reference))
+                    conn.execute(mm.memory_relations.insert().values(from_memory_id=memory_id,
+                        to_memory_id=old["id"], relation_type="supersedes" if can_supersede else "contradicts"))
                 stored += 1
         revision = expected_revision
-        if stored:
+        if stored or provenance_changed:
             revision = expected_revision + 1
             conn.execute(m.companions.update().where(m.companions.c.id == scope.companion_id).values(memory_revision=revision))
             from ..identity import models as identity
@@ -221,9 +317,10 @@ class MemoryWriter:
 class Extractor:
     """Configured extraction model adapter. The writer remains the only trust gate."""
 
-    def __init__(self, complete, model, max_candidates=8, timeout=30):
+    def __init__(self, complete, model, max_candidates=8, timeout=30, system_prompt=None):
         self.complete, self.model = complete, model
         self.max_candidates, self.timeout = max_candidates, timeout
+        self.system_prompt = system_prompt or _SYSTEM_PROMPT
 
     @staticmethod
     def _parse(raw):
@@ -253,7 +350,7 @@ class Extractor:
     async def extract(self, scope, events):
         offered = {"events": events}
         messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": json.dumps(offered, ensure_ascii=False, default=str)},
         ]
         raw = await self._call(messages)
@@ -262,7 +359,7 @@ class Extractor:
             result = self._parse(raw)
         except (ValueError, TypeError, json.JSONDecodeError):
             repair = [
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": self.system_prompt},
                 {"role": "user", "content": json.dumps(offered, ensure_ascii=False, default=str)},
                 {"role": "assistant", "content": (raw or "")[:4000]},
                 {"role": "user", "content": "你上次的输出不是符合要求的严格 JSON。只输出修正后的 JSON 对象，不要代码围栏或解释。"},

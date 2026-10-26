@@ -70,6 +70,8 @@ class OutputOptions(DTO):
     # auto uses the server-side probability; always forces a voice message for this
     # request; off never synthesizes. Legacy audio=True is treated as always.
     voice: Literal["auto", "always", "off"] = "auto"
+    # Calls use incremental text without waiting for the non-streaming Agent tool loop.
+    realtime: bool = False
 
 
 class ChatRequest(DTO):

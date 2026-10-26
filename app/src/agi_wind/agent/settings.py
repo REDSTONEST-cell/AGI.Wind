@@ -19,6 +19,9 @@ class AgentSettings(DTO):
     sticker_send_enabled: bool = True
     web_search_enabled: bool = False
     file_access_mode: Literal['disabled', 'ask', 'full'] = 'ask'
+    command_access_mode: Literal['disabled', 'ask', 'full'] = 'disabled'
+    command_timeout_seconds: float = Field(default=30, ge=1, le=300)
+    command_max_output_chars: int = Field(default=8000, ge=500, le=16000)
     max_rounds: int = Field(default=3, ge=1, le=8)
     max_tool_calls: int = Field(default=6, ge=1, le=16)
     tool_timeout_seconds: float = Field(default=15, gt=0, le=60)

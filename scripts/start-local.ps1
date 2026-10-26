@@ -7,6 +7,21 @@ $stateDir = Join-Path $projectRoot 'data'
 $scriptDir = $PSScriptRoot
 
 function Start-LocalVoice {
+    $memoryRuntime = $null
+    $persistedPath = Join-Path $stateDir 'settings.json'
+    if (Test-Path -LiteralPath $persistedPath) {
+        try { $memoryRuntime = (Get-Content -LiteralPath $persistedPath -Raw -Encoding UTF8 | ConvertFrom-Json).memory } catch {}
+    }
+    if ((Test-Path -LiteralPath (Join-Path $projectRoot 'config\memory.local.json')) -and $memoryRuntime.memory_semantic_enabled -ne $false) {
+        try { & (Join-Path $scriptDir 'start-memory-model.ps1') } catch { Write-Output "Memory model startup failed: $($_.Exception.Message)" }
+    }
+    if ($memoryRuntime.memory_worker_mode -eq 'separate') {
+        try { & (Join-Path $scriptDir 'start-memory-worker.ps1') } catch { Write-Output "Memory worker startup failed: $($_.Exception.Message)" }
+    }
+    if (Test-Path -LiteralPath (Join-Path $projectRoot 'config\https.local.json')) {
+        try { & (Join-Path $scriptDir 'start-https.ps1') } catch { Write-Output "HTTPS startup failed: $($_.Exception.Message)" }
+    }
+    try { & (Join-Path $scriptDir 'start-asr.ps1') } catch { Write-Output "实时识别启动失败，网关继续运行：$($_.Exception.Message)" }
     $voiceScript = Join-Path $scriptDir 'start-voice.ps1'
     if (-not (Test-Path -LiteralPath $voiceScript)) {
         Write-Output '未找到 scripts/start-voice.ps1，跳过本地语音启动。'

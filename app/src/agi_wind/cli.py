@@ -62,6 +62,8 @@ def main():
     parser.add_argument("--root",type=Path,default=Path(__file__).resolve().parents[3])
     commands=parser.add_subparsers(dest="command",required=True)
     commands.add_parser("init-local")
+    memory_worker=commands.add_parser('memory-worker')
+    memory_worker.add_argument('--once',action='store_true',help='执行一次记忆后台周期后退出')
     serve=commands.add_parser("serve")
     serve.add_argument("--port",type=int,default=18440)
     serve.add_argument("--host",default=None,help="监听地址；局域网服务用 0.0.0.0，默认 127.0.0.1")
@@ -74,6 +76,9 @@ def main():
     args=parser.parse_args()
     root=args.root.resolve()
     if args.command=="init-local": init_local(root)
+    elif args.command == 'memory-worker':
+        from .memory.runtime import run_worker
+        asyncio.run(run_worker(root,once=args.once))
     elif args.command=="serve":
         os.environ["AGI_CONFIG"]=str(root/"config/app.local.yaml")
         if args.host: os.environ["AGI_HOST"]=args.host

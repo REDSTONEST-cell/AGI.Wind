@@ -47,7 +47,10 @@ class FileTools:
 
     def path(self, value):
         path = Path(value).expanduser()
-        return (path if path.is_absolute() else self.base / path).resolve()
+        if path.is_absolute():
+            return path.resolve()
+        self.base.mkdir(parents=True, exist_ok=True)
+        return (self.base / path).resolve()
 
     def check(self):
         policy = self.settings()
@@ -138,7 +141,8 @@ class FileTools:
             backup.write_bytes(previous)
         elif expected:
             raise AppError('FILE_CHANGED', '目标文件已不存在', 409)
-        if path.parent == self.base: self.base.mkdir(parents=True, exist_ok=True)
+        if path.is_relative_to(self.base):
+            path.parent.mkdir(parents=True, exist_ok=True)
         if expected:
             fd, name = tempfile.mkstemp(prefix='.agi-agent-', dir=path.parent)
             temporary = Path(name)

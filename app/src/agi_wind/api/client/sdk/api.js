@@ -123,12 +123,15 @@ export class AgiWindClient {
     return this.url('/api/v1/assets/' + encodeURIComponent(assetId));
   }
 
-  /** Same-origin images use <img src>; cross-origin Bearer images are fetched as blobs. */
+  /** Load any asset as an authenticated blob URL (cookies for same-origin, Bearer for split mode). */
   async assetObjectUrl(assetId) {
-    if (!this.bearer) return this.assetUrl(assetId);
     if (this._assetCache.has(assetId)) return this._assetCache.get(assetId);
-    const response = await fetch(this.assetUrl(assetId), { headers: this.authHeaders(), cache: 'no-store', credentials: 'omit' });
-    if (!response.ok) throw new ApiError('ASSET_UNAVAILABLE', '头像不可用', response.status);
+    const response = await fetch(this.assetUrl(assetId), {
+      headers: this.authHeaders(),
+      credentials: this.bearer ? 'omit' : 'same-origin',
+      cache: 'no-store',
+    });
+    if (!response.ok) throw new ApiError('ASSET_UNAVAILABLE', '资源读取失败', response.status);
     const url = URL.createObjectURL(await response.blob());
     this._assetCache.set(assetId, url);
     return url;
@@ -193,7 +196,6 @@ export class AgiWindClient {
   capabilities() {
     return this.request('/api/v1/capabilities');
   }
-
   companions() {
     return this.request('/api/v1/companions');
   }
@@ -284,6 +286,14 @@ export class AgiWindClient {
       method: 'PATCH',
       body: { importance },
     });
+  }
+
+  memoryUpdateItem(memoryId, body) {
+    return this.request('/api/v1/memory/items/' + encodeURIComponent(memoryId), { method: 'PATCH', body });
+  }
+
+  memorySummary(companionId, level = 'daily') {
+    return this.request('/api/v1/memory/consolidations', { method: 'POST', body: { companion_id: companionId, level } });
   }
 
   memoryRecallTest(companionId, query) {

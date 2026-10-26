@@ -52,6 +52,7 @@ if (Test-Path -LiteralPath $gatewayPidFile) {
     }
 }
 if (-not $KeepVoice) {
+    try { & (Join-Path $PSScriptRoot 'stop-asr.ps1') } catch { Write-Output "ASR 停止失败：$($_.Exception.Message)" }
     try {
         $voicePidFile = Join-Path $stateDir 'voice.pid'
         if (-not (Test-Path -LiteralPath $voicePidFile)) {
@@ -92,6 +93,16 @@ if (-not $KeepVoice) {
     } catch { Write-Output "Voice: 停止语音进程时出错：$($_.Exception.Message)" }
 } else {
     Write-Output 'Voice: 保留运行中的语音进程（-KeepVoice）。'
+}
+if (-not $KeepVoice) {
+    foreach ($memoryScript in @('stop-memory-worker.ps1','stop-memory-model.ps1')) {
+        if (Test-Path -LiteralPath (Join-Path $PSScriptRoot $memoryScript)) {
+            try { & (Join-Path $PSScriptRoot $memoryScript) } catch { Write-Output "Memory shutdown failed: $($_.Exception.Message)" }
+        }
+    }
+}
+if (-not $KeepVoice -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'stop-https.ps1'))) {
+    try { & (Join-Path $PSScriptRoot 'stop-https.ps1') } catch { Write-Output "HTTPS shutdown failed: $($_.Exception.Message)" }
 }
 if ($StopDatabase) {
     $pidFile = Join-Path $stateDir 'gateway.pid'

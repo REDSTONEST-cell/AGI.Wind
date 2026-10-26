@@ -30,6 +30,11 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
         if event['tool'] in ('read_file', 'list_files') and isinstance(payload.get('result'), dict):
             result = payload['result']
             payload['result'] = {key: result[key] for key in ('path', 'sha256', 'bytes', 'truncated') if key in result}
+        if event['tool'] == 'run_command' and isinstance(payload.get('result'), dict):
+            result = payload['result']
+            # stdout/stderr go to the temporary model tool result only; the durable
+            # trace keeps the command envelope instead of a second full copy.
+            payload['result'] = {key: result[key] for key in ('command', 'cwd', 'exit_code', 'truncated') if key in result}
         if event['tool'] == 'search_memory' and 'result' in payload:
             # Source text goes only to the temporary model tool result. A second
             # durable copy here would escape the source deletion/tombstone graph.
@@ -74,5 +79,8 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
         from .files import FileTools
         files = FileTools(service.agent_data_dir, settings, service.agent_approvals, scope, generation_id, check)
         specs += files.specs()
+        from .commands import CommandTools
+        commands = CommandTools(service.agent_data_dir, settings, service.agent_approvals, scope, generation_id, check)
+        specs += commands.specs()
     result = await AgentRunner(policy, specs, on_event=trace, on_reasoning=reasoning, check_current=check).run(provider, model, messages)
     return result.text

@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
-from .extraction import MemoryWriter
+from .extraction import MemoryWriter, source_owned_clause
 from ..archive import models as m
 from ..archive.repository import lock
 from ..identity.service import authorize
@@ -28,6 +28,10 @@ logger = logging.getLogger("agi_wind.memory")
 
 def enqueue_extraction(conn, scope, generation_id):
     """Register one idempotent extraction job for a completed generation."""
+    lock(conn, scope.companion_id)
+    if conn.scalar(select(m.outbox.c.id).where(m.outbox.c.event_type == MEMORY_EXTRACT,
+        m.outbox.c.aggregate_id == scope.companion_id, m.outbox.c.state == 'pending').limit(1)):
+        return None
     return conn.execute(
         insert(m.outbox)
         .values(
@@ -110,6 +114,7 @@ def _load_batch(conn, scope, companion, limit, exclude_id=None):
         m.events.c.account_id == scope.account_id,
         m.events.c.companion_id == scope.companion_id,
         m.events.c.visibility == "visible",
+        source_owned_clause(scope),
         or_(
             and_(m.events.c.role == "user", m.events.c.kind == "user_input"),
             and_(m.events.c.role == "assistant", m.events.c.kind == "assistant_output"),
@@ -142,7 +147,7 @@ def _load_models(conn, scope, limit):
     return companion, rows
 
 
-async def run_extraction(db, extractor, worker, job, batch_events=8):
+async def run_extraction(db, extractor, worker, job, batch_events=8, settings=None):
     """Handler for one claimed ``memory.extract`` outbox row."""
     scope = scope_from_payload(job.get("payload") or {})
     job_id, worker_id = job["id"], job["worker_id"]
@@ -163,7 +168,8 @@ async def run_extraction(db, extractor, worker, job, batch_events=8):
         return {"status": "noop", "stored": 0, "reinforced": 0, "quarantined": 0}
     batch = [_batch_row(row) for row in rows]
     offered = [_model_event(row) for row in rows]
-    candidates, usage = await extractor.extract(scope, offered)
+    from .budget import budgeted_extract
+    candidates, usage = await budgeted_extract(db, settings, scope, job, extractor, offered)
     with db.engine.begin() as conn:
         worker.owned(conn, job_id, worker_id)
         lock(conn, scope.companion_id)
@@ -172,11 +178,23 @@ async def run_extraction(db, extractor, worker, job, batch_events=8):
             raise AppError("EXTRACTION_OUTPACED", "该批次已被其他任务推进", 409)
         if companion["memory_revision"] != expected_revision:
             raise AppError("STALE_CONTEXT", "提炼任务的记忆版本已失效", 409)
-        summary = MemoryWriter(db).commit_candidates(conn, scope, candidates, batch, expected_revision)
+        summary = MemoryWriter(db, retention_days=settings.memory_retention_days if settings else None).commit_candidates(conn, scope, candidates, batch, expected_revision)
         last = rows[-1]
         conn.execute(m.companions.update().where(m.companions.c.id == scope.companion_id).values(memory_extract_cursor_at=last["recorded_at"], memory_extract_cursor_id=last["id"]))
         result = {"status": "committed", "events": len(rows), "candidates": len(candidates), **summary, "usage": usage, "pipeline_version": PIPELINE_VERSION}
         payload = {**(job.get("payload") or {}), "usage": usage, "result": {"stored": summary["stored"], "reinforced": summary["reinforced"], "quarantined": summary["quarantined"], "ignored": summary["ignored"], "events": len(rows)}}
         conn.execute(m.outbox.update().where(m.outbox.c.id == job_id).values(payload=payload))
+        # One coalesced job can have more than one bounded batch to consume. Leave a
+        # durable continuation so old backlog does not require another chat message.
+        next_cursor={**companion,'memory_extract_cursor_at':last['recorded_at'],'memory_extract_cursor_id':last['id']}
+        if _load_batch(conn,scope,next_cursor,1):
+            pending = conn.scalar(select(m.outbox.c.id).where(m.outbox.c.event_type == MEMORY_EXTRACT,
+                m.outbox.c.aggregate_id == scope.companion_id, m.outbox.c.state == 'pending').limit(1))
+            if pending is None:
+                conn.execute(insert(m.outbox).values(event_type=MEMORY_EXTRACT,
+                    aggregate_id=scope.companion_id,
+                    payload={**(job.get('payload') or {}), 'continuation':True},
+                    dedupe_key=f'memory-continue:{scope.companion_id}:{last["id"]}:{expected_revision}')
+                    .on_conflict_do_nothing())
     logger.info("memory extracted companion=%s events=%s candidates=%s stored=%s reinforced=%s quarantined=%s ignored=%s calls=%s", scope.companion_id, len(rows), len(candidates), summary["stored"], summary["reinforced"], summary["quarantined"], summary["ignored"], usage.get("calls"))
     return result

@@ -2,16 +2,18 @@ import { AgiWindClient, ApiError } from './sdk/api.js?v=20261027a';
 import { appendImages, messageImages } from './media.js?v=20261027a';
 import { cropAvatar } from './avatar-crop.js?v=20261027a';
 import { splitReply } from './reply-segments.js?v=20261027a';
-import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027a';
-import { createAgentPage } from './agent-settings.js';
+import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027b';
+import { createAgentPage } from './agent-settings.js?v=20261027e';
+import { createRealtimeCall } from './realtime-call.js?v=20261026-call3';
 
 const client = new AgiWindClient();
+let realtimeCall;
 const agentPage = createAgentPage(client);
 const DEFAULT_KEY = '123456';
 const SERVER_STORAGE = 'agiwind-server';
 const MODEL_TABS = [
   { key: 'dialogue', label: '计划 / 对话模型', role: 'dialogue', capability: 'text', ready: true, hint: '主对话模型，也用于计划与整段回复。' },
-  { key: 'asr', label: '语音转文字', role: 'asr', capability: 'asr', ready: false, hint: '语音识别适配器尚未接入；现在保存配置不会生效。' },
+  { key: 'asr', label: '语音转文字', role: 'asr', capability: 'asr', ready: false, hint: '实时通话使用本地 Zipformer 流式识别服务；在对话输入区点击“通话”即可使用，无需配置厂商模型。' },
   { key: 'tts', label: '文字转语音', role: 'tts', capability: 'tts', ready: false, hint: '本地 Breeze-TTS-2 语音服务；在这里配置音色、概率与试听。' },
   { key: 'embedding', label: '嵌入', role: 'embedding', capability: 'embedding', ready: false, hint: '向量嵌入尚未接入；当前记忆检索使用中文关键词 + 精确子串。' },
   { key: 'rerank', label: '重排序', role: 'rerank', capability: 'rerank', ready: false, hint: '重排序适配器尚未接入；现在保存配置不会生效。' },
@@ -702,8 +704,33 @@ function pageFromHash() {
   return PAGES[name] ? name : 'chat';
 }
 
+function openMemoryDrawer() {
+  const drawer = $('#memory-drawer');
+  const backdrop = $('#memory-drawer-backdrop');
+  if (!drawer || !backdrop) return;
+  drawer.hidden = false;
+  backdrop.hidden = false;
+  document.body.classList.add('memory-drawer-open');
+  requestAnimationFrame(() => drawer.classList.add('open'));
+  $('#memory-drawer-close')?.focus({preventScroll:true});
+}
+
+function closeMemoryDrawer() {
+  const drawer = $('#memory-drawer');
+  const backdrop = $('#memory-drawer-backdrop');
+  if (!drawer || drawer.hidden) return;
+  drawer.classList.remove('open');
+  document.body.classList.remove('memory-drawer-open');
+  setTimeout(() => {
+    if (drawer.classList.contains('open')) return;
+    drawer.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+  }, 200);
+}
+
 function renderPage(name, { load = true } = {}) {
   if (!PAGES[name]) name = 'chat';
+  closeMemoryDrawer();
   $('#app').classList.toggle('chat-active',name==='chat');
   document.body.classList.toggle('chat-layout',name==='chat');
   state.currentPage = name;
@@ -2440,6 +2467,7 @@ function setBusy(busy) {
 }
 
 async function stopGeneration() {
+  if (realtimeCall?.active) await realtimeCall.stop();
   const streaming = state.streaming;
   stopAllAudio();
   const timeout = new AbortController();
@@ -2656,6 +2684,8 @@ function renderMemoryBars(container, rows) {
   ])));
 }
 
+const MEMORY_RETENTION_DEFAULTS = {preference:60, fact:180, identity:365, relationship:90, commitment:90, plan:2, episode:7, other:30};
+
 async function loadMemorySettings() {
   try {
     const settings = await client.memorySettings();
@@ -2666,8 +2696,25 @@ async function loadMemorySettings() {
     $('#memory-timeout-seconds').value = settings.timeout_seconds;
     $('#memory-maintenance-enabled').checked = !!settings.maintenance_enabled;
     $('#memory-maintenance-hours').value = settings.maintenance_hours;
-    $('#memory-embedding-chip').textContent = settings.embedding === 'keyword_only' ? '向量：未接入' : '向量：已配置未接入';
-    $('#memory-settings-hint').textContent = '当前提炼：' + (MEMORY_EXTRACTOR_LABELS[settings.extractor] || settings.extractor || '未配置') + '；向量语义检索尚未接入。';
+    $('#memory-semantic-enabled').checked = settings.semantic_enabled !== false;
+    $('#memory-consolidation-enabled').checked = settings.consolidation_enabled !== false;
+    $('#memory-daily-budget').value = settings.daily_budget_usd ?? 0.05;
+    $('#memory-daily-tokens').value = settings.daily_token_limit ?? 200000;
+    $('#memory-input-price').value = settings.input_price_per_million ?? 0.3;
+    $('#memory-output-price').value = settings.output_price_per_million ?? 1.2;
+    $('#memory-output-tokens').value = settings.max_output_tokens ?? 2048;
+    $('#memory-worker-mode').value = settings.worker_mode || 'gateway';
+    state.memoryRetentionDraft = {...(settings.retention_days || {})};
+    state.memoryRetentionKind = $('#memory-retention-kind').value;
+    $('#memory-retention-days').value = state.memoryRetentionDraft[state.memoryRetentionKind] ?? MEMORY_RETENTION_DEFAULTS[state.memoryRetentionKind];
+    const embeddingLabels = {semantic_local:'本地语义：已就绪', keyword_only:'检索：关键词模式', local_pending:'本地语义：准备中', local_unavailable:'模型离线：关键词回退'};
+    $('#memory-embedding-chip').textContent = embeddingLabels[settings.embedding] || '本地语义：' + settings.embedding;
+    $('#memory-settings-hint').textContent = '当前提炼：' + (MEMORY_EXTRACTOR_LABELS[settings.extractor] || settings.extractor || '未配置') + '；固定记忆可在详情中管理。';
+    const budget = settings.budget || {};
+    const workerLabels = {running:'运行中', busy:'处理中', gateway:'网关内运行', standby:'待命', stopped:'已停止', stale:'心跳过期', not_running:'未启动'};
+    $('#memory-budget-hint').textContent = '今日费用估算 $' + Number(budget.estimated_usd || 0).toFixed(4) + '，预留 $' + Number(budget.reserved_usd || 0).toFixed(4) + '；后台：' + (workerLabels[settings.worker?.status] || '状态待确认') + '。单价可按模型调整，估算不等于实际账单。';
+    $('#memory-summary-now').disabled = settings.consolidation_enabled === false;
+    $('#memory-summary-week').disabled = settings.consolidation_enabled === false;
   } catch (error) {
     $('#memory-settings-hint').textContent = '设置读取失败：' + error.message;
   }
@@ -2685,6 +2732,15 @@ async function saveMemorySettings(event) {
       timeout_seconds: Number($('#memory-timeout-seconds').value),
       maintenance_enabled: $('#memory-maintenance-enabled').checked,
       maintenance_hours: Number($('#memory-maintenance-hours').value),
+      semantic_enabled: $('#memory-semantic-enabled').checked,
+      consolidation_enabled: $('#memory-consolidation-enabled').checked,
+      daily_budget_usd: Number($('#memory-daily-budget').value),
+      daily_token_limit: Number($('#memory-daily-tokens').value),
+      input_price_per_million: Number($('#memory-input-price').value),
+      output_price_per_million: Number($('#memory-output-price').value),
+      max_output_tokens: Number($('#memory-output-tokens').value),
+      worker_mode: $('#memory-worker-mode').value,
+      retention_days: {...state.memoryRetentionDraft, [$('#memory-retention-kind').value]: Number($('#memory-retention-days').value)},
     });
     state.memorySettings = settings;
     toast('记忆设置已保存并生效。');
@@ -2806,6 +2862,10 @@ function renderMemoryDetail(memory) {
   fact('类型', MEMORY_KIND_LABELS[memory.kind] || memory.kind || '其他');
   fact('性质', MEMORY_EPISTEMIC_LABELS[memory.epistemic_type] || memory.epistemic_type || '未知');
   fact('状态', MEMORY_STATUS_LABELS[memory.status] || memory.status || '未知');
+  fact('固定', memory.is_pinned ? '已固定，不自动遗忘' : '按保留策略管理');
+  if (memory.summary_level) fact('摘要', memory.summary_level === 'weekly' ? '每周来源片段摘要' : '每日来源片段摘要');
+  if (memory.valid_from) fact('生效时间', formatTime(memory.valid_from));
+  if (memory.valid_to) fact('结束时间', formatTime(memory.valid_to));
   fact('置信度', Math.round(Number(memory.confidence || 0) * 100) + '%');
   fact('重要度', Math.round(Number(memory.importance || 0.5) * 100) + '%');
   fact('访问次数', String(memory.access_count || 0));
@@ -2828,8 +2888,16 @@ function renderMemoryDetail(memory) {
   }
   body.append(sources);
 
+  if (memory.related_items?.length) {
+    const history = el('div', {class:'memory-sources'});
+    history.append(el('p', {class:'meta', text:'更新与冲突记录'}));
+    for (const related of memory.related_items) history.append(el('p', {class:'quote', text:(MEMORY_STATUS_LABELS[related.status] || related.status) + ' · ' + related.content}));
+    body.append(history);
+  }
+
   const actions = el('div', { class: 'memory-detail-actions' });
   if (memory.status === 'active') {
+    actions.append(el('button', {class:'btn ghost small',type:'button',text:memory.is_pinned ? '取消固定' : '固定（防止自动遗忘）',onclick:() => updateMemoryPolicy(memory,{is_pinned:!memory.is_pinned})}));
     actions.append(el('button', { class: 'btn ghost small', type: 'button', text: '纠正', onclick: () => openCorrection(memory) }));
     if (Number(memory.importance || 0) < 0.85) {
       actions.append(el('button', { class: 'btn ghost small', type: 'button', text: '标为重要', onclick: () => setMemoryImportance(memory, 0.9) }));
@@ -2837,8 +2905,27 @@ function renderMemoryDetail(memory) {
     actions.append(el('button', { class: 'btn ghost small', type: 'button', text: '隐藏（停止召回）', onclick: () => toggleMemoryStatus(memory, 'hidden') }));
   } else if (memory.status === 'hidden') {
     actions.append(el('button', { class: 'btn primary small', type: 'button', text: '恢复召回', onclick: () => toggleMemoryStatus(memory, 'active') }));
+  } else if (memory.status === 'disputed') {
+    actions.append(el('button', {class:'btn primary small',type:'button',text:'确认 / 纠正这条记忆',onclick:() => openCorrection(memory)}));
   }
   body.append(actions);
+}
+
+async function updateMemoryPolicy(memory, patch) {
+  try {
+    await client.memoryUpdateItem(memory.id, patch);
+    await Promise.all([openMemoryDetail(memory.id), loadMemoryItems(), loadMemoryStats()]);
+    toast(patch.is_pinned ? '已固定，仍可手动纠正或删除。' : '已取消固定，恢复保留策略。');
+  } catch (error) { toast('记忆设置失败：' + error.message); }
+}
+
+async function queueMemorySummary(level) {
+  if (!state.companionId) return;
+  try {
+    const result = await client.memorySummary(state.companionId, level);
+    toast(result.job_id ? '摘要已排队，使用同一每日预算。' : '暂无新来源，或同一摘要已排队。');
+    await loadMemoryJobs();
+  } catch (error) { toast('摘要排队失败：' + error.message); }
 }
 
 async function openCorrectionForItem(item) {
@@ -2994,14 +3081,15 @@ async function loadMemoryJobs() {
     }
     box.replaceChildren(...jobs.map((job) => {
       const row = el('div', { class: 'memory-job' });
+      row.append(el('span', {class:'meta',text:job.event_type === 'memory.consolidate' ? '阶段摘要' : '记忆提炼'}));
       row.append(el('span', { class: 'state ' + job.state, text: MEMORY_JOB_LABELS[job.state] || job.state }));
       row.append(el('span', { class: 'meta', text: formatTime(job.created_at) }));
       row.append(el('span', { class: 'meta', text: '尝试 ' + job.attempts + ' 次' }));
       const result = job.result || {};
-      if (result.events !== undefined) {
-        row.append(el('span', { class: 'meta', text: '事件 ' + result.events + ' · 写入 ' + (result.stored || 0) + ' · 忽略 ' + (result.ignored || 0) + ' · 隔离 ' + (result.quarantined || 0) }));
+      if (result.events !== undefined || result.source_count !== undefined) {
+        row.append(el('span', { class: 'meta', text: '来源 ' + (result.events ?? result.source_count) + ' · 写入 ' + (result.stored || 0) + ' · 忽略 ' + (result.ignored || 0) + ' · 隔离 ' + (result.quarantined || 0) }));
       }
-      if (job.last_error_code) row.append(el('span', { class: 'meta', text: '错误 ' + job.last_error_code }));
+      if (job.last_error_code) row.append(el('span', { class: 'meta', text: job.last_error_code === 'MEMORY_BUDGET_EXCEEDED' ? '预算已用尽，等待下一预算日或调整额度' : '错误 ' + job.last_error_code }));
       return row;
     }));
   } catch (error) {
@@ -3640,6 +3728,7 @@ function bind() {
       await stopGeneration();
       return;
     }
+    if (realtimeCall?.active) { toast('通话中可直接说话，或先挂断再发送文字'); return; }
     if (state.busy||state.uploadingImages||(!text&&!state.pendingImages.length)) return;
     input.value = '';
     input.style.height = '';
@@ -3697,9 +3786,23 @@ function bind() {
   $('#memory-recall-form').addEventListener('submit', runRecallTest);
   $('#memory-maintain').addEventListener('click', maintainMemories);
   $('#memory-settings-form').addEventListener('submit', saveMemorySettings);
+  $('#memory-summary-now').addEventListener('click', () => queueMemorySummary('daily'));
+  $('#memory-summary-week').addEventListener('click', () => queueMemorySummary('weekly'));
+  $('#memory-retention-kind').addEventListener('change', () => {
+    state.memoryRetentionDraft ||= {};
+    if (state.memoryRetentionKind) state.memoryRetentionDraft[state.memoryRetentionKind] = Number($('#memory-retention-days').value);
+    state.memoryRetentionKind = $('#memory-retention-kind').value;
+    $('#memory-retention-days').value = state.memoryRetentionDraft[state.memoryRetentionKind] ?? MEMORY_RETENTION_DEFAULTS[state.memoryRetentionKind];
+  });
   $('#proactive-settings-form').addEventListener('submit', saveProactiveSettings);
   $('#proactive-test').addEventListener('click', testProactiveMessage);
   $('#memory-embedding-open').addEventListener('click', openEmbeddingSettings);
+  $('#memory-tools-open').addEventListener('click', openMemoryDrawer);
+  $('#memory-drawer-close').addEventListener('click', closeMemoryDrawer);
+  $('#memory-drawer-backdrop').addEventListener('click', closeMemoryDrawer);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !$('#memory-drawer').hidden) closeMemoryDrawer();
+  });
   $('#memory-refresh').addEventListener('click', loadMemoryPage);
   $('#memory-jobs-refresh').addEventListener('click', loadMemoryJobs);
   $('#memory-extract-now').addEventListener('click', extractMemoryNow);
@@ -3721,6 +3824,42 @@ initTheme();
 state.logEntries = loadLogEntries();
 renderTerm();
 bind();
+realtimeCall = createRealtimeCall(client, {
+  async prepare() {
+    if (state.busy || state.uploadingImages) { toast('请先停止当前回复或等待上传完成'); return null; }
+    if (!state.companionId) { toast('请先进入一个角色的对话'); return null; }
+    if (!state.conversation) await loadActiveConversation();
+    return state.conversation?.id;
+  },
+  conversationId: () => state.conversation?.id,
+  stopAudio: stopAllAudio,
+  error: toast,
+  log: (text, data) => logEvent('system', text, '', data),
+  trace: (id, type, payload) => logProcessing(id, type, payload),
+  beginTurn(text) {
+    appendMessage('user', text, {animate:true});
+    const first = appendMessage('assistant', '', {className:'pending', animate:true});
+    const bubbles = [first];
+    showChatEmpty(false);
+    return {
+      update(value) {
+        const parts = splitReply(stripHiddenReplyPrefix(value), {final:false});
+        parts.forEach((part, index) => {
+          if (!bubbles[index]) bubbles.push(appendMessage('assistant', '', {animate:true}));
+          bubbles[index].body.innerHTML = renderMarkdown(part.text);
+          bubbles[index].partText = part.text;
+        });
+        scrollToEnd(true);
+      },
+      finish(status) {
+        for (const bubble of bubbles) bubble.node.classList.remove('pending', 'streaming');
+        if (status === 'cancelled') bubbles.at(-1).meta.append(el('span', {text:'已停止'}));
+        if (status === 'failed') markFailed(bubbles.at(-1), 'CALL_REPLY_FAILED', bubbles.at(-1).partText || '');
+      },
+      sticker(value) { appendMessage('assistant', '', {attachments:[value], animate:true}); },
+    };
+  },
+});
 initLogResize();
 new ResizeObserver(syncLogScrim).observe($('.composer-wrap'));
 boot().catch((error) => showGate('启动失败：' + error.message));

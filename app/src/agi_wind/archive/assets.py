@@ -55,9 +55,13 @@ class AssetStore:
         try:
             if declared_mime in ("image/png", "image/jpeg", "image/webp", "image/gif"):
                 with Image.open(path) as image:
+                    # Trust the decoded bytes, not the extension/MIME the browser declared:
+                    # drag-and-drop temp files are often JPEG/WebP data saved with a .png name.
                     mime = Image.MIME.get(image.format)
-                    if mime != declared_mime or image.width * image.height > 25_000_000:
-                        raise ValueError("MIME/dimension mismatch")
+                    if mime not in ("image/png", "image/jpeg", "image/webp", "image/gif"):
+                        raise ValueError("unsupported image format")
+                    if image.width * image.height > 25_000_000:
+                        raise ValueError("dimension mismatch")
                     frames=getattr(image,'n_frames',1)
                     if frames>200 or frames*image.width*image.height>50_000_000: raise ValueError('too many pixels/frames')
                     metadata = {"width": image.width, "height": image.height, "frames": frames}

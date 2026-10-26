@@ -33,6 +33,9 @@ class AgentPatch(DTO):
     sticker_send_enabled: bool | None = None
     web_search_enabled: bool | None = None
     file_access_mode: Literal['disabled', 'ask', 'full'] | None = None
+    command_access_mode: Literal['disabled', 'ask', 'full'] | None = None
+    command_timeout_seconds: float | None = Field(default=None, ge=1, le=300)
+    command_max_output_chars: int | None = Field(default=None, ge=500, le=16000)
     max_rounds: int | None = Field(default=None, ge=1, le=8)
     max_tool_calls: int | None = Field(default=None, ge=1, le=16)
     tool_timeout_seconds: float | None = Field(default=None, gt=0, le=60)
@@ -87,6 +90,7 @@ def install_agent_routes(app, settings, store, service, authenticate):
                     {'name': 'web_search', 'label': '联网检索', 'available': policy.web_search_enabled and configured},
                     {'name': 'web_fetch', 'label': '网页抓取', 'available': policy.web_search_enabled and policy.search_backend == 'deepseek' and configured},
                     {'name': 'computer_files', 'label': '电脑文件（' + {'disabled':'关闭','ask':'逐次批准','full':'完全访问'}[policy.file_access_mode] + '）', 'available': policy.file_access_mode != 'disabled'},
+                    {'name': 'run_command', 'label': '执行命令行（' + {'disabled':'关闭','ask':'逐次批准','full':'完全允许'}[policy.command_access_mode] + '）', 'available': policy.command_access_mode != 'disabled'},
                 ]}
 
     @app.get('/api/v1/agent/approvals')
@@ -140,5 +144,5 @@ def install_agent_routes(app, settings, store, service, authenticate):
         candidate = settings.model_copy(update={'agent': updated})
         persist_settings(candidate)
         settings.agent = updated
-        if 'file_access_mode' in values or values.get('enabled') is False: approvals.revoke()
+        if 'file_access_mode' in values or 'command_access_mode' in values or values.get('enabled') is False: approvals.revoke()
         return view()

@@ -1,4 +1,4 @@
-from sqlalchemy import Table, Column, Text, Integer, Float, Boolean, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Table, Column, Text, Integer, Float, Boolean, DateTime, Date, LargeBinary, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from ..archive.models import metadata, idcol, fk, js, ts
 
@@ -9,3 +9,42 @@ retrieval_chunks = Table("retrieval_chunks", metadata, idcol(), fk("account_id",
 embedding_spaces = Table("embedding_spaces", metadata, idcol(), Column("fingerprint", Text, nullable=False, unique=True), js("config"), Column("status", Text, nullable=False, default="building"), js("checkpoint"))
 quarantine = Table("quarantine", metadata, idcol(), fk("account_id", "accounts"), fk("companion_id", "companions"), js("candidate"), Column("reason", Text, nullable=False), ts())
 MEMORY_TABLES = ["memory_items", "source_refs", "memory_relations", "retrieval_chunks", "embedding_spaces", "quarantine"]
+
+# Authoritative fields travel with the existing memory_items archive rows. Empty defaults
+# keep pre-0012 archives importable without inventing semantic identities for old facts.
+for column in (
+    Column('subject_key', Text, nullable=False, server_default='', default=''),
+    Column('predicate', Text, nullable=False, server_default='', default=''),
+    Column('value', Text, nullable=False, server_default='', default=''),
+    Column('valid_from', DateTime(timezone=True)),
+    Column('valid_to', DateTime(timezone=True)),
+    Column('is_pinned', Boolean, nullable=False, server_default='false', default=False),
+    Column('summary_level', Text, nullable=False, server_default='', default=''),
+):
+    memory_items.append_column(column)
+
+# Rebuildable and operational state is deliberately excluded from ARCHIVE_TABLE_ORDER.
+def _derived_fk(name, table):
+    return Column(name, UUID(as_uuid=True), ForeignKey(table + '.id', ondelete='CASCADE'), nullable=False)
+
+memory_vectors = Table('memory_vectors', metadata, idcol(), _derived_fk('memory_id', 'memory_items'),
+    _derived_fk('space_id', 'embedding_spaces'), Column('content_hash', Text, nullable=False),
+    Column('vector', LargeBinary, nullable=False), Column('revision', Integer, nullable=False),
+    ts(), UniqueConstraint('memory_id', 'space_id'))
+chunk_vectors = Table('chunk_vectors', metadata, idcol(), _derived_fk('chunk_id', 'retrieval_chunks'),
+    _derived_fk('space_id', 'embedding_spaces'), Column('content_hash', Text, nullable=False),
+    Column('vector', LargeBinary, nullable=False), Column('revision', Integer, nullable=False),
+    ts(), UniqueConstraint('chunk_id', 'space_id'))
+memory_usage = Table('memory_usage', metadata, idcol(), _derived_fk('account_id', 'accounts'),
+    _derived_fk('companion_id', 'companions'), Column('job_id', UUID(as_uuid=True), nullable=False),
+    Column('attempt', Integer, nullable=False), Column('billing_day', Date, nullable=False),
+    Column('reserved_usd', Float, nullable=False, server_default='0'),
+    Column('used_usd', Float, nullable=False, server_default='0'),
+    Column('prompt_tokens', Integer, nullable=False, server_default='0'),
+    Column('completion_tokens', Integer, nullable=False, server_default='0'),
+    Column('input_rate', Float, nullable=False, server_default='0'),
+    Column('output_rate', Float, nullable=False, server_default='0'),
+    Column('usage_estimated', Boolean, nullable=False, server_default='true'),
+    Column('status', Text, nullable=False, server_default='reserved'), ts(),
+    UniqueConstraint('job_id', 'attempt'))
+MEMORY_DERIVED_TABLES = [memory_vectors, chunk_vectors, memory_usage]

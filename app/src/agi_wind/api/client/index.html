@@ -18,7 +18,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/client/styles.css?v=20261027a">
+  <link rel="stylesheet" href="/client/styles.css?v=20261027d">
 </head>
 <body>
   <!-- 线性图标集：统一 24px 网格、1.75 描边 -->
@@ -155,6 +155,12 @@
           </div>
 
           <div class="composer-wrap">
+            <div id="call-panel" class="call-panel" role="region" aria-label="实时语音通话" hidden>
+              <span class="call-indicator" aria-hidden="true"></span>
+              <div class="call-copy"><strong id="call-status" role="status">正在连接…</strong><span id="call-caption"></span></div>
+              <button id="call-mute" class="btn ghost small" type="button" aria-pressed="false" disabled>静音</button>
+              <button id="call-hangup" class="btn small call-hangup" type="button">挂断</button>
+            </div>
             <form class="composer" id="composer">
               <div id="pending-images" class="pending-images"></div>
               <div class="composer-row">
@@ -164,6 +170,7 @@
                 </label>
                 <textarea id="input" rows="1" maxlength="48000" placeholder="说点什么…" aria-label="消息内容"></textarea>
                 <div class="composer-actions">
+                  <button id="call-toggle" class="voice-switch" type="button" aria-pressed="false" title="实时语音通话">通话</button>
                   <button class="voice-switch" id="voice-toggle" type="button" role="switch" aria-checked="false" aria-label="语音回复开关" title="开启后，她会尽量用语音回复">
                     <svg><use href="#i-wave"/></svg><span class="voice-switch-label">语音</span>
                   </button>
@@ -340,10 +347,11 @@
             <div class="page-heading-copy">
               <div class="eyebrow">她的档案</div>
               <h1>记忆</h1>
-              <p>聊天完成后异步提炼长期记忆；可以搜索、纠正、隐藏，并维护生命周期。当前为关键词检索。</p>
+              <p>聊天完成后异步提炼长期记忆；可以搜索、纠正、隐藏，并维护生命周期。检索方式和后台状态可在下方设置中查看。</p>
             </div>
             <div class="page-actions">
               <span class="chip" id="memory-extractor-chip">提炼状态读取中…</span>
+              <button class="btn ghost" id="memory-tools-open" type="button"><svg><use href="#i-settings"/></svg>记忆工具与设置</button>
             </div>
           </div>
 
@@ -403,6 +411,16 @@
             </aside>
           </div>
 
+          <div class="memory-drawer-backdrop" id="memory-drawer-backdrop" hidden></div>
+          <aside class="memory-drawer" id="memory-drawer" hidden aria-label="记忆工具与设置">
+            <div class="memory-drawer-head">
+              <div>
+                <h2>记忆工具与设置</h2>
+                <p class="meta">召回测试、分布、提炼任务与预算设置；不影响上面的记忆列表。</p>
+              </div>
+              <button class="icon-button ghost" id="memory-drawer-close" type="button" aria-label="关闭记忆工具" title="关闭"><svg><use href="#i-close"/></svg></button>
+            </div>
+            <div class="memory-drawer-body">
           <div class="grid two-up">
             <section class="card memory-recall-card">
               <div class="card-head">
@@ -440,7 +458,7 @@
 
           <section class="card memory-settings-card">
             <div class="card-head">
-              <div><h2>记忆设置</h2><p class="meta">控制自动提炼与生命周期维护；保存后热生效，并写入 data/settings.json。</p></div>
+              <div><h2>记忆设置</h2><p class="meta">控制自动提炼、保留策略和预算；保存后生效。</p></div>
               <span class="chip subtle" id="memory-embedding-chip">向量：未接入</span>
             </div>
             <form id="memory-settings-form" class="memory-settings-grid">
@@ -468,13 +486,28 @@
                 <span><strong>维护间隔</strong><small>单位：小时</small></span>
                 <input class="input" id="memory-maintenance-hours" type="number" min="1" max="720">
               </label>
+              <label class="setting-row"><span><strong>本地语义检索</strong><small>模型离线时回退关键词</small></span><input type="checkbox" class="switch" id="memory-semantic-enabled"></label>
+              <label class="setting-row"><span><strong>阶段摘要</strong><small>每日/每周整理有来源的片段</small></span><input type="checkbox" class="switch" id="memory-consolidation-enabled"></label>
+              <label class="setting-row"><span><strong>每日记忆预算</strong><small>美元估算；0 表示暂停模型调用</small></span><input class="input" id="memory-daily-budget" type="number" min="0" max="100" step="0.01" required></label>
+              <label class="setting-row"><span><strong>每日 Token 上限</strong><small>含预留量；按 UTC 日重置</small></span><input class="input" id="memory-daily-tokens" type="number" min="0" max="100000000" step="1000" required></label>
+              <label class="setting-row"><span><strong>输入估算单价</strong><small>美元 / 百万 Token</small></span><input class="input" id="memory-input-price" type="number" min="0" max="1000" step="0.01" required></label>
+              <label class="setting-row"><span><strong>输出估算单价</strong><small>美元 / 百万 Token</small></span><input class="input" id="memory-output-price" type="number" min="0" max="1000" step="0.01" required></label>
+              <label class="setting-row"><span><strong>单次输出上限</strong><small>提炼与摘要共用</small></span><input class="input" id="memory-output-tokens" type="number" min="256" max="8192" required></label>
+              <label class="setting-row"><span><strong>后台运行方式</strong><small>独立进程减少聊天等待</small></span><select class="input" id="memory-worker-mode"><option value="separate">独立后台</option><option value="gateway">网关内后台</option></select></label>
+              <label class="setting-row"><span><strong>基础保留天数</strong><small>重要度与访问会延长；固定记忆不自动过期</small></span><span class="memory-policy-controls"><select class="input" id="memory-retention-kind"><option value="preference">偏好</option><option value="fact">事实</option><option value="identity">身份</option><option value="relationship">关系</option><option value="commitment">承诺</option><option value="plan">计划</option><option value="episode">经历</option><option value="other">其他</option></select><input class="input" id="memory-retention-days" type="number" min="1" max="3650" required></span></label>
+              <p class="meta" id="memory-budget-hint"></p>
               <div class="form-actions memory-settings-actions">
                 <p class="meta" id="memory-settings-hint"></p>
                 <button class="btn ghost" id="memory-embedding-open" type="button">配置嵌入模型</button>
+                <button class="btn ghost" id="memory-summary-now" type="button">整理今日摘要</button>
+                <button class="btn ghost" id="memory-summary-week" type="button">整理本周摘要</button>
                 <button class="btn primary" id="memory-settings-save" type="submit">保存设置</button>
               </div>
             </form>
           </section>
+
+            </div>
+          </aside>
         </section>
 
         <!-- 模型与语音 -->
@@ -561,7 +594,7 @@
             <div class="page-heading-copy">
               <div class="eyebrow">系统</div>
               <h1>Agent 能力</h1>
-              <p>让她按需要查询记忆、挑选表情包、检索网络资料或访问电脑文件。工具过程只在系统日志显示。</p>
+              <p>让她按需要查询记忆、挑选表情包、检索网络资料、访问电脑文件或执行命令行。工具过程只在系统日志显示。</p>
             </div>
             <div class="page-actions"><button class="btn ghost small" id="agent-refresh" type="button"><svg><use href="#i-refresh"/></svg>刷新</button></div>
           </div>
@@ -594,6 +627,19 @@
                 <div><strong>Windows 管理员权限</strong><p class="meta" id="agent-admin-state"></p></div>
                 <button class="btn ghost small" id="agent-admin-request" type="button">请求管理员权限</button>
               </div>
+            </section>
+
+            <section class="card">
+              <div class="card-head">
+                <div><h2>命令行执行</h2><p class="meta">让 Agent 在网关所在电脑执行命令（Windows 用 cmd，其他系统用 sh）。</p></div>
+                <svg class="card-icon"><use href="#i-terminal"/></svg>
+              </div>
+              <div class="agent-settings-grid three">
+                <label class="field"><span>访问模式</span><select class="select" name="command_access_mode"><option value="disabled">关闭</option><option value="ask">逐次批准</option><option value="full">完全允许</option></select></label>
+                <label class="field"><span>单条命令超时（秒）</span><input class="input" type="number" name="command_timeout_seconds" min="1" max="300" required></label>
+                <label class="field"><span>输出字符上限</span><input class="input" type="number" name="command_max_output_chars" min="500" max="16000" required></label>
+              </div>
+              <p class="meta">参考 AstrBot 的 Agent 电脑能力：默认关闭；Windows 没有本机进程沙箱，命令以网关进程用户权限运行，逐次批准弹窗是唯一的人工闸门。默认工作目录为 <code>data/agent-workspace</code>，不要执行破坏性或长期驻留命令。</p>
             </section>
 
             <section class="card">
@@ -641,52 +687,6 @@
         </section>
 
         <!-- 连接 -->
-        <section class="page" data-page="connection" hidden>
-          <div class="page-heading">
-            <div class="page-heading-copy">
-              <div class="eyebrow">系统</div>
-              <h1>连接</h1>
-              <p>同机浏览器会自动登录；服务器与客户端分开部署时，在这里填写服务器地址和客户端密钥。</p>
-            </div>
-          </div>
-
-          <div class="stat-row">
-            <div class="metric"><span>服务状态</span><strong class="metric-text" id="metric-service">—</strong><small>/health/ready</small></div>
-            <div class="metric"><span>数据库</span><strong class="metric-text" id="metric-database">—</strong><small>PostgreSQL</small></div>
-            <div class="metric"><span>对话模型</span><strong class="metric-text" id="metric-dialogue">—</strong><small>当前提供商</small></div>
-            <div class="metric"><span>档案格式</span><strong class="metric-text" id="metric-archive-format">—</strong><small>archive format</small></div>
-          </div>
-
-          <div class="grid two-up">
-            <section class="card span-all">
-              <div class="card-head"><div><h2>服务器与密钥</h2><p class="meta">局域网示例：<code>http://192.168.x.x:18440</code>。服务端需用“启动服务端(局域网).cmd”启动；默认密钥 123456，正式使用前请更换。</p></div></div>
-              <div class="grid-2">
-                <label class="field"><span>服务器地址</span><input id="server-address" class="input" placeholder="http://127.0.0.1:18440" autocomplete="off"></label>
-                <label class="field"><span>客户端密钥</span><input id="server-key" class="input" type="password" value="123456" autocomplete="off"></label>
-              </div>
-              <div class="form-actions">
-                <p class="meta" id="connection-state"></p>
-                <button class="btn ghost" id="disconnect" type="button" hidden>断开服务器</button>
-                <button class="btn primary" id="connect" type="button">连接服务器</button>
-              </div>
-            </section>
-
-            <section class="card">
-              <div class="card-head"><h2>当前连接</h2></div>
-              <dl class="facts" id="connection-facts"></dl>
-            </section>
-
-            <section class="card">
-              <div class="card-head"><h2>安全说明</h2><svg class="card-icon"><use href="#i-shield"/></svg></div>
-              <p class="body-text">同源浏览器使用 HttpOnly 会话与 CSRF；独立客户端使用 Bearer 密钥。长期令牌不会进入浏览器存储，密钥只保存在服务端。</p>
-              <div class="layer-note">
-                <strong>本地优先</strong>
-                默认只监听 127.0.0.1；切换到局域网模式前，请更换默认客户端密钥，并只把真实客户端来源加入服务端 CORS 白名单。
-              </div>
-            </section>
-          </div>
-        </section>
-
         <!-- 外观与账户 -->
         <section class="page" data-page="appearance" hidden>
           <div class="page-heading">
@@ -837,6 +837,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="/client/app.js?v=20261027a"></script>
+  <script type="module" src="/client/app.js?v=20261027memory1"></script>
 </body>
 </html>

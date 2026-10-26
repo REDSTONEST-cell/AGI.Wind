@@ -122,6 +122,15 @@ class Settings(DTO):
     memory_extract_timeout_seconds: float = Field(default=30, gt=0, le=300)
     memory_maintenance_enabled: bool = True
     memory_maintenance_hours: float = Field(default=6, gt=0, le=720)
+    memory_semantic_enabled: bool = True
+    memory_retention_days: dict[str, float] = Field(default_factory=dict)
+    memory_daily_budget_usd: float = Field(default=0.05, ge=0, le=100)
+    memory_daily_token_limit: int = Field(default=200000, ge=0, le=100_000_000)
+    memory_input_price_per_million: float = Field(default=0.3, ge=0, le=1000)
+    memory_output_price_per_million: float = Field(default=1.2, ge=0, le=1000)
+    memory_extract_max_output_tokens: int = Field(default=2048, ge=256, le=8192)
+    memory_consolidation_enabled: bool = True
+    memory_worker_mode: Literal['gateway', 'separate'] = 'gateway'
     # estimate_tokens counts UTF-8 bytes; Chinese persona text is ~3x its character count.
     # 48000 leaves room for a long persona plus a normal turn without every request failing.
     context_budget_bytes: int = Field(default=48000, ge=1000, le=4_000_000)
@@ -129,6 +138,9 @@ class Settings(DTO):
 
     @model_validator(mode="after")
     def supported_models(self):
+        allowed_kinds = {'episode','plan','fact','relationship','preference','commitment','identity','other'}
+        if any(kind not in allowed_kinds or not 1 <= days <= 3650 for kind, days in self.memory_retention_days.items()):
+            raise ValueError('memory_retention_days requires known kinds and 1..3650 days')
         for role in type(self.models).model_fields:
             model = getattr(self.models, role)
             if model is None or (role == "embedding" and model.provider_id == "local"):
@@ -157,6 +169,9 @@ MEMORY_SETTING_FIELDS = (
     "memory_extract_timeout_seconds",
     "memory_maintenance_enabled",
     "memory_maintenance_hours",
+    "memory_semantic_enabled", "memory_retention_days", "memory_daily_budget_usd",
+    "memory_daily_token_limit", "memory_input_price_per_million", "memory_output_price_per_million",
+    "memory_extract_max_output_tokens", "memory_consolidation_enabled", "memory_worker_mode",
 )
 
 

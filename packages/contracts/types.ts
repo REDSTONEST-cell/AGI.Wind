@@ -69,6 +69,7 @@ export type Text2 = boolean;
 export type Audio = boolean;
 export type Avatar = boolean;
 export type Voice = "auto" | "always" | "off";
+export type Realtime = boolean;
 export type DeviceId = string;
 export type RequestId1 = string;
 export type GenerationId2 = string;
@@ -301,6 +302,7 @@ export interface OutputOptions {
   audio?: Audio;
   avatar?: Avatar;
   voice?: Voice;
+  realtime?: Realtime;
 }
 /**
  * This interface was referenced by `AGIWindProtocol10`'s JSON-Schema

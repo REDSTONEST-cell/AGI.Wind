@@ -511,6 +511,11 @@
           ],
           "title": "Voice",
           "type": "string"
+        },
+        "realtime": {
+          "default": false,
+          "title": "Realtime",
+          "type": "boolean"
         }
       },
       "title": "OutputOptions",

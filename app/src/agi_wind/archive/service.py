@@ -19,6 +19,9 @@ class ArchiveService:
             state = conversation.get("state", "active")
             content = request.input.model_dump(mode="json")
             options = request.output.model_dump(mode="json")
+            # Preserve pre-call request hashes for ordinary chat retries across upgrades.
+            if not options.get('realtime'):
+                options.pop('realtime', None)
             input_hash = digest({"conversation_id": request.conversation_id, "input": content, "output": options})
             existing = conn.execute(select(m.requests).where(m.requests.c.id == request.request_id)).mappings().first()
             if existing:

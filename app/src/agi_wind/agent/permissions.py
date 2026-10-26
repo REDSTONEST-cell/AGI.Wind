@@ -7,8 +7,9 @@ from ..core.errors import AppError
 
 
 class ApprovalQueue:
-    def __init__(self):
+    def __init__(self, timeout=120):
         self.pending = {}
+        self.timeout = timeout
 
     @staticmethod
     def owner(actor):
@@ -23,7 +24,11 @@ class ApprovalQueue:
                'details': details, 'created_at': datetime.now(timezone.utc).isoformat()}
         self.pending[key] = (self.owner(actor), row, future)
         try:
-            if not await asyncio.wait_for(future, 120):
+            try:
+                allowed = await asyncio.wait_for(future, self.timeout)
+            except TimeoutError:
+                raise AppError('TOOL_APPROVAL_TIMEOUT', '等待用户批准超时，文件操作已取消', 408) from None
+            if not allowed:
                 raise AppError('TOOL_APPROVAL_DENIED', '用户拒绝了本次文件操作，请停止重复请求', 403)
         finally:
             self.pending.pop(key, None)

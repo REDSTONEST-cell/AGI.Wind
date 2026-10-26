@@ -1,0 +1,5 @@
+{
+  "hostname": "your-ipv6-hostname.example.com",
+  "bind_address": "2001:db8::1",
+  "gateway_port": 18440
+}

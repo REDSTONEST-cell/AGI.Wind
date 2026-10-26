@@ -1,6 +1,6 @@
 /** Isolated Agent settings page. Credentials never enter localStorage or logs. */
 const BOOLEAN_FIELDS = ['enabled', 'memory_search_enabled', 'sticker_search_enabled', 'sticker_send_enabled', 'web_search_enabled'];
-const NUMBER_FIELDS = ['max_rounds', 'max_tool_calls', 'tool_timeout_seconds', 'total_timeout_seconds', 'max_result_chars', 'search_max_results'];
+const NUMBER_FIELDS = ['max_rounds', 'max_tool_calls', 'tool_timeout_seconds', 'total_timeout_seconds', 'max_result_chars', 'search_max_results', 'command_timeout_seconds', 'command_max_output_chars'];
 
 export function createAgentPage(client) {
   const form = document.querySelector('#agent-settings-form');
@@ -15,6 +15,7 @@ export function createAgentPage(client) {
     form.elements.search_backend.value = data.search_backend;
     form.elements.search_url.value = data.search_url;
     form.elements.file_access_mode.value = data.file_access_mode || 'ask';
+    form.elements.command_access_mode.value = data.command_access_mode || 'disabled';
     document.querySelector('#agent-admin-state').textContent = data.administrator ? '服务当前以管理员身份运行' : '服务当前使用普通用户权限';
     document.querySelector('#agent-admin-request').disabled = Boolean(data.administrator);
     form.elements.api_key.value = '';
@@ -70,6 +71,7 @@ export function createAgentPage(client) {
     payload.search_backend = form.elements.search_backend.value;
     payload.search_url = form.elements.search_url.value.trim();
     payload.file_access_mode = form.elements.file_access_mode.value;
+    payload.command_access_mode = form.elements.command_access_mode.value;
     const key = form.elements.api_key.value.trim();
     if (key) payload.api_key = key;
     payload.clear_key = form.elements.clear_key.checked;

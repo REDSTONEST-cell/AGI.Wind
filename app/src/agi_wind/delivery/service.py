@@ -162,14 +162,18 @@ class GenerationService:
                         "token_estimate":context.token_estimate,
                         "model":{"provider_id":model.provider_id,"model_id":model.model_id} if model else None,
                     }, generation["epoch"])
-                agent_turn=bool(self.agent_settings and self.agent_settings().enabled)
-                messages = self.messages(context, vision, scope, include_sticker=not agent_turn)
+                realtime=bool(request["output"].get("realtime"))
+                agent_turn=bool(not realtime and self.agent_settings and self.agent_settings().enabled)
+                messages = self.messages(context, vision, scope, include_sticker=not agent_turn and not realtime)
+                if realtime:
+                    messages.append({'role':'system','content':'当前正在实时语音通话。请用适合口述的简短自然句子回应，避免Markdown和长篇列表；需要较长解释时先简短回应。'})
                 async def reply_chunks():
                     if agent_turn:
                         from ..agent.delivery import run_agent
                         yield await run_agent(self,generation_id,scope,generation,provider,model,messages)
                     else:
-                        async for chunk in provider.stream(model,messages): yield chunk
+                        stream_reply = getattr(provider,'stream_realtime',provider.stream) if realtime else provider.stream
+                        async for chunk in stream_reply(model,messages): yield chunk
                 reply_step=await agent.tool_start('reply','reply','正在生成回复') if agent else None
                 emotion_stream = EmotionTagStream()
                 segmenter = ReplySegmenter()

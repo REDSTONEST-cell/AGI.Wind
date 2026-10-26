@@ -76,6 +76,7 @@ export function createAudioMessage(client, message, options = {}) {
   message.body.hidden = true;
 
   let audio = null;
+  let pendingPlay = false;
   let objectUrl = null;
   let attachment = null;
   let currentState = 'queued';
@@ -113,8 +114,73 @@ export function createAudioMessage(client, message, options = {}) {
     root.classList.toggle('audio-failed', state === 'failed' || state === 'skipped' || state === 'cancelled');
   };
 
+  const loadAudio = () => {
+    const assetId = attachment?.asset_id;
+    if (!assetId) { setStatus('语音不可用', 'failed'); play.disabled = true; return; }
+    const expected = attachment?.duration_ms ? attachment.duration_ms / 1000 : 0;
+    duration.textContent = expected ? formatDuration(expected) : '--:--';
+    setStatus('', 'ready');
+    const token = ++loadToken;
+    client.assetObjectUrl(assetId).then((url) => {
+      if (destroyed || token !== loadToken) return;
+      release();
+      objectUrl = String(url).startsWith('blob:') ? url : null;
+      audio = new Audio(url);
+      audio.preload = 'metadata';
+      audio.addEventListener('error', () => {
+        if (destroyed) return;
+        setStatus('语音加载失败，点击重试', 'ready');
+        release();
+      });
+      audio.addEventListener('loadedmetadata', () => {
+        if (destroyed || !audio) return;
+        duration.textContent = formatDuration(audio.duration);
+      });
+      audio.addEventListener('timeupdate', () => {
+        if (!audio) return;
+        const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
+        setProgress(total ? audio.currentTime / total : 0);
+        duration.textContent = formatDuration(total || expected);
+      });
+      audio.addEventListener('play', () => {
+        setGlyph(play, 'pause');
+        play.setAttribute('aria-label', '暂停语音');
+        setStatus('', 'ready');
+      });
+      audio.addEventListener('pause', () => {
+        setGlyph(play, 'play');
+        play.setAttribute('aria-label', '播放语音');
+        if (audio && !audio.ended && activePlayer === controller) setStatus('', 'ready');
+      });
+      audio.addEventListener('ended', () => {
+        setGlyph(play, 'play');
+        play.setAttribute('aria-label', '播放语音');
+        duration.textContent = formatDuration(expected || 0);
+        setProgress(0);
+        if (activePlayer === controller) activePlayer = null;
+      });
+      play.disabled = false;
+      if (pendingPlay) {
+        pendingPlay = false;
+        stopOther(controller);
+        activePlayer = controller;
+        audio.play().catch(() => setStatus('点击播放', 'ready'));
+      }
+      if (autoplayWanted && !autoplayTried) {
+        autoplayTried = true;
+        stopOther(controller);
+        activePlayer = controller;
+        audio.play().catch(() => setStatus('点击播放', 'ready'));
+      }
+    }).catch((error) => {
+      if (destroyed || token !== loadToken) return;
+      setStatus(error && error.status === 401 ? '语音需要重新登录' : '语音读取失败，点击重试', 'ready');
+    });
+  };
+
   const toggle = () => {
-    if (!audio || currentState !== 'ready') return;
+    if (currentState !== 'ready') return;
+    if (!audio) { pendingPlay = true; loadAudio(); return; }
     if (audio.paused) {
       stopOther(controller);
       activePlayer = controller;
@@ -136,60 +202,7 @@ export function createAudioMessage(client, message, options = {}) {
     if (next.autoplay === false) autoplayWanted = false;
 
     if (nextState === 'ready') {
-      const assetId = attachment?.asset_id;
-      if (!assetId) {
-        setStatus('语音不可用', 'failed');
-        play.disabled = true;
-        return;
-      }
-      const expected = attachment?.duration_ms ? attachment.duration_ms / 1000 : 0;
-      duration.textContent = expected ? formatDuration(expected) : '--:--';
-      setStatus('', 'ready');
-      const token = ++loadToken;
-      client.assetObjectUrl(assetId).then((url) => {
-        if (destroyed || token !== loadToken) return;
-        release();
-        objectUrl = String(url).startsWith('blob:') ? url : null;
-        audio = new Audio(url);
-        audio.preload = 'metadata';
-        audio.addEventListener('loadedmetadata', () => {
-          if (destroyed) return;
-          duration.textContent = formatDuration(audio.duration);
-        });
-        audio.addEventListener('timeupdate', () => {
-          const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : 0;
-          setProgress(total ? audio.currentTime / total : 0);
-          duration.textContent = formatDuration(total || expected);
-        });
-        audio.addEventListener('play', () => {
-          setGlyph(play, 'pause');
-          play.setAttribute('aria-label', '暂停语音');
-          setStatus('', 'ready');
-        });
-        audio.addEventListener('pause', () => {
-          setGlyph(play, 'play');
-          play.setAttribute('aria-label', '播放语音');
-          if (audio && !audio.ended && activePlayer === controller) setStatus('', 'ready');
-        });
-        audio.addEventListener('ended', () => {
-          setGlyph(play, 'play');
-          play.setAttribute('aria-label', '播放语音');
-          duration.textContent = formatDuration(expected || 0);
-          setProgress(0);
-          if (activePlayer === controller) activePlayer = null;
-        });
-        play.disabled = false;
-        if (autoplayWanted && !autoplayTried) {
-          autoplayTried = true;
-          stopOther(controller);
-          activePlayer = controller;
-          audio.play().catch(() => setStatus('点击播放', 'ready'));
-        }
-      }).catch(() => {
-        if (destroyed || token !== loadToken) return;
-        setStatus('语音读取失败', 'failed');
-        play.disabled = true;
-      });
+      loadAudio();
       return;
     }
 
