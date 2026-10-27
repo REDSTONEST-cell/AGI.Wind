@@ -12,6 +12,7 @@ from ..agent.search import WebSearch
 from ..agent.settings import AgentSettings
 from ..agent.tools import StationTools
 from ..core.errors import AppError
+from .reasoning import ReasoningBuffer
 
 
 _FIELDS = {
@@ -64,17 +65,22 @@ class IdleToolSession:
             if (prefer_stream or not callable(getattr(provider,'complete',None))) and callable(getattr(provider,'stream',None)):
                 stream = getattr(provider,'stream_cognition',provider.stream)
                 parts, size = [], 0
+                thinking = ReasoningBuffer(self.on_reasoning) if self.on_reasoning else None
                 async for chunk in stream(model,messages):
                     await self.check()
                     if not isinstance(chunk,str) and chunk.kind=='reasoning':
-                        if self.on_reasoning:
-                            await self.on_reasoning(chunk.text)
+                        if thinking:
+                            await thinking.add(chunk.text)
                         continue
+                    if thinking:
+                        await thinking.flush()
                     value = chunk if isinstance(chunk,str) else chunk.text
                     size += len(value)
                     if size>6000:
                         raise AppError('COGNITION_INVALID_OUTPUT','自主任务输出过大',502)
                     parts.append(value)
+                if thinking:
+                    await thinking.flush()
                 return ''.join(parts)
             text = await provider.complete(model, messages)
             await self.check()

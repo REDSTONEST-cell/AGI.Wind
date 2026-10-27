@@ -102,3 +102,28 @@ async def test_disabled_mode_has_no_spec_and_rejects(tmp_path):
     assert tools.specs() == []
     with pytest.raises(AppError):
         await tools.execute(CommandArgs(command=echo('hi')))
+
+
+async def test_cancelling_the_tool_terminates_the_running_command(tmp_path):
+    _, _, _, tools = setup(tmp_path, 'full', command_timeout_seconds=30)
+    marker = tmp_path / 'still-running.txt'
+    if sys.platform == 'win32':
+        command = 'ping -n 4 127.0.0.1 > nul && echo late > "' + str(marker) + '"'
+    else:
+        command = 'sleep 3; echo late > "' + str(marker) + '"'
+    task = asyncio.create_task(tools.execute(CommandArgs(command=command)))
+    await asyncio.sleep(0.5)
+    task.cancel()
+    started = asyncio.get_running_loop().time()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    # Stop/turn deadline must not leave the command running in a worker thread.
+    assert asyncio.get_running_loop().time() - started < 3
+    await asyncio.sleep(3.5)
+    assert not marker.exists()
+
+
+def test_command_spec_timeout_outlasts_the_command_timeout(tmp_path):
+    _, _, _, tools = setup(tmp_path, 'full', command_timeout_seconds=40, tool_timeout_seconds=15)
+    spec = tools.specs()[0]
+    assert spec.execution_timeout(15) == 50

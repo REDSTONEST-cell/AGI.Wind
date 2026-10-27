@@ -141,6 +141,10 @@ class VisualAgent:
             chosen = library[index]
         return await self.send(sticker_id=chosen['id'])
 
+    def reflect_reasoning(self):
+        from .reasoning import ReasoningBuffer
+        return ReasoningBuffer(lambda text: self.service.record_reasoning(self.id, self.scope, self.generation, 'reflect', text))
+
     async def generate_tags(self, vision):
         """Ask the model for a few searchable tags when the action plan omitted them."""
         if not vision: return ['表情']
@@ -198,12 +202,14 @@ class VisualAgent:
         model = self.model.model_copy(update={'parameters': params})
         try:
             raw = ''
+            thinking = self.reflect_reasoning()
             async for chunk in self.provider.stream(model, messages):
                 if not isinstance(chunk, str) and chunk.kind == 'reasoning':
-                    await self.service.record_reasoning(self.id, self.scope, self.generation, 'reflect', chunk.text)
+                    await thinking.add(chunk.text)
                     continue
                 raw += chunk if isinstance(chunk, str) else chunk.text
                 if len(raw) > 16000: raise ValueError('plan too large')
+            await thinking.flush()
             plan = SendPlan.model_validate_json(raw)
             if plan.send_sticker and plan.send_sticker not in {sticker['id'] for sticker in library}: return
             if plan.send_sticker: await self.send(sticker_id=plan.send_sticker)
@@ -228,12 +234,14 @@ class VisualAgent:
             model=self.model.model_copy(update={'parameters':params})
             async def collect():
                 result=''
+                thinking=self.reflect_reasoning()
                 async for chunk in self.provider.stream(model,messages):
                     if not isinstance(chunk,str) and chunk.kind=='reasoning':
-                        await self.service.record_reasoning(self.id,self.scope,self.generation,'reflect',chunk.text)
+                        await thinking.add(chunk.text)
                     else:
                         result+=chunk if isinstance(chunk,str) else chunk.text
                         if len(result)>16000: raise ValueError('plan too large')
+                await thinking.flush()
                 return result
             raw=await asyncio.wait_for(collect(),timeout=self.service.reflection_timeout)
             plan=ActionPlan.model_validate_json(raw)
