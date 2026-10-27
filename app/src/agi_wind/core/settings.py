@@ -77,6 +77,13 @@ class ProactiveSettings(DTO):
     max_per_day: int = Field(default=3, ge=1, le=20)
     quiet_start: str = "23:00"
     quiet_end: str = "08:00"
+    # After each completed reply the companion may think privately for a bounded number
+    # of rounds, then decide whether to speak again. Effective only when enabled=True.
+    after_reply_enabled: bool = True
+    after_reply_delay_seconds: int = Field(default=150, ge=30, le=3600)
+    after_reply_max_rounds: int = Field(default=2, ge=1, le=3)
+    after_reply_max_steps: int = Field(default=4, ge=1, le=8)
+    after_reply_max_runs_per_day: int = Field(default=6, ge=1, le=20)
 
     @field_validator("quiet_start", "quiet_end")
     @classmethod

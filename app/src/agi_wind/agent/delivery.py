@@ -32,9 +32,10 @@ def agent_execution_policy(settings, scope):
     return policy, not group_scene
 
 
-async def run_agent(service, generation_id, scope, generation, provider, model, messages):
+async def run_agent(service, generation_id, scope, generation, provider, model, messages, stats=None):
     settings = service.agent_settings
     policy, local_tools_allowed = agent_execution_policy(settings, scope)
+    stats = stats if stats is not None else {}
 
     async def check():
         if not settings().enabled: raise AppError('AGENT_DISABLED', 'Agent 能力已关闭，已停止本轮工具执行', 409)
@@ -44,8 +45,13 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
             authorize(conn, scope, scope.companion_id)
             service.assert_current(conn, generation_id, generation['memory_revision'], generation['epoch'])
 
+    def on_step(meta):
+        stats['rounds'] = max(int(stats.get('rounds') or 0), int(meta.get('round') or 0))
+        stats['steps'] = max(int(stats.get('steps') or 0), int(meta.get('step') or 0))
+
     async def reasoning(text):
-        await service.record_reasoning(generation_id, scope, generation, 'agent', text)
+        await service.record_reasoning(generation_id, scope, generation, 'agent', text,
+                                       round_no=stats.get('rounds') or 1, step_no=stats.get('steps') or 1)
 
     async def trace(event):
         payload = dict(event)
@@ -109,5 +115,9 @@ async def run_agent(service, generation_id, scope, generation, provider, model, 
     asked = any(word in str((request_input or {}).get('text') or '') for word in STICKER_ASK_WORDS)
     if not asked and service.random_value() >= STICKER_TURN_CHANCE:
         specs = [spec for spec in specs if spec.name not in ('search_stickers', 'send_sticker')]
-    result = await AgentRunner(policy, specs, on_event=trace, on_reasoning=reasoning, check_current=check).run(provider, model, messages)
+    result = await AgentRunner(policy, specs, on_event=trace, on_reasoning=reasoning,
+                               on_step=on_step, check_current=check).run(provider, model, messages)
+    stats['rounds'] = result.rounds_used
+    stats['steps'] = result.steps_used
+    stats['tool_calls'] = result.calls_used
     return result.text

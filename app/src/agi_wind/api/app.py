@@ -38,6 +38,7 @@ from ..memory.consolidation import MEMORY_CONSOLIDATE, enqueue_consolidation, ru
 from ..memory.budget import MemoryBudget
 from ..delivery.service import GenerationService,generation_scope,TERMINAL
 from ..delivery.proactive import ProactiveService
+from ..delivery.idle_cognition import IdleCognitionService
 from ..delivery.stream import encode_sse
 from ..delivery import models as dm
 from ..voice.service import VoiceService
@@ -114,6 +115,11 @@ class ProactiveSettingsPatch(DTO):
     max_per_day:int|None=Field(default=None,ge=1,le=20)
     quiet_start:str|None=Field(default=None,max_length=5)
     quiet_end:str|None=Field(default=None,max_length=5)
+    after_reply_enabled:bool|None=None
+    after_reply_delay_seconds:int|None=Field(default=None,ge=30,le=3600)
+    after_reply_max_rounds:int|None=Field(default=None,ge=1,le=3)
+    after_reply_max_steps:int|None=Field(default=None,ge=1,le=8)
+    after_reply_max_runs_per_day:int|None=Field(default=None,ge=1,le=20)
 class ProactiveSendRequest(DTO): companion_id:UUID
 class ExportRequest(DTO): companion_id:UUID
 class StickerCreate(DTO):
@@ -234,6 +240,9 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     wakeup=asyncio.Event()
     service.notify=wakeup.set
     proactive=ProactiveService(db,settings,service)
+    idle_cognition=IdleCognitionService(db,settings,service,proactive=proactive)
+    proactive.idle_cognition=idle_cognition
+    service.idle_cognition=idle_cognition
 
     @asynccontextmanager
     async def lifespan(app):
@@ -309,13 +318,28 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                 except TimeoutError:
                     pass
         proactive_task=asyncio.create_task(proactive_loop())
+        async def idle_cognition_loop():
+            while not closing.is_set():
+                if settings.proactive.enabled and settings.proactive.after_reply_enabled:
+                    try:
+                        await idle_cognition.tick()
+                    except Exception:
+                        logger.warning("idle cognition tick failed",exc_info=True)
+                    timeout=10
+                else:
+                    timeout=60
+                try:
+                    await asyncio.wait_for(closing.wait(),timeout=timeout)
+                except TimeoutError:
+                    pass
+        idle_cognition_task=asyncio.create_task(idle_cognition_loop())
         try: yield
         finally:
             closing.set(); wakeup.set()
             await app.state.qq_bridge.close()
-            for pending in (task,maintenance_task,proactive_task):
+            for pending in (task,maintenance_task,proactive_task,idle_cognition_task):
                 pending.cancel()
-            await asyncio.gather(task,maintenance_task,proactive_task,return_exceptions=True)
+            await asyncio.gather(task,maintenance_task,proactive_task,idle_cognition_task,return_exceptions=True)
             close_voice=getattr(voice,"close",None)
             if close_voice: await close_voice()
             if service.provider and hasattr(service.provider,"aclose"): await service.provider.aclose()
@@ -330,6 +354,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     app.state.db,app.state.service,app.state.assets=db,service,assets
     app.state.voice=voice
     app.state.proactive=proactive
+    app.state.idle_cognition=idle_cognition
     app.state.browser_sessions=sessions
     app.state.settings=settings
     db.memory_settings=settings
@@ -968,7 +993,14 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         if companion_id is not None:
             with db.engine.connect() as conn: authorize(conn,current,companion_id)
             data.update(proactive.stats(current, companion_id))
+            recent=idle_cognition.recent(current,companion_id,limit=1)
+            data["recent_cognition"]=recent[0] if recent else None
         return data
+
+    @app.get("/api/v1/proactive/cognitions")
+    def list_idle_cognitions(companion_id:UUID,limit:int=Query(default=10,ge=1,le=50),current=Depends(authenticate)):
+        with db.engine.connect() as conn: authorize(conn,current,companion_id)
+        return idle_cognition.recent(current,companion_id,limit=limit)
 
     @app.get("/api/v1/proactive/settings")
     def get_proactive_settings(companion_id:UUID|None=None,current=Depends(authenticate)):

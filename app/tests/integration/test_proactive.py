@@ -112,6 +112,34 @@ async def test_proactive_force_skips_idle_but_requires_model(db, actor, seeded_s
     assert forced["sent"] is True
 
 
+async def test_proactive_settings_exposes_after_reply_cognition_controls(db, actor, seeded_scope, tmp_path):
+    app = client_app(db, actor, tmp_path, provider=ProactiveProvider())
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        _, csrf = await connect(client)
+        headers = {"Origin": "http://test", "X-AGI-CSRF": csrf}
+        response = await client.patch("/api/v1/proactive/settings", json={
+            "after_reply_enabled": True,
+            "after_reply_delay_seconds": 120,
+            "after_reply_max_rounds": 2,
+            "after_reply_max_steps": 3,
+            "after_reply_max_runs_per_day": 4,
+        }, headers=headers)
+        assert response.status_code == 200, response.text
+        view = response.json()
+        assert view["after_reply_delay_seconds"] == 120
+        assert view["after_reply_max_steps"] == 3
+        full_view = (await client.get("/api/v1/proactive/settings", params={
+            "companion_id": str(seeded_scope.companion_id)})).json()
+        assert "recent_cognition" in full_view
+        assert full_view["recent_cognition"] is None
+        cognitions = await client.get("/api/v1/proactive/cognitions",
+                                      params={"companion_id": str(seeded_scope.companion_id)})
+        assert cognitions.status_code == 200 and cognitions.json() == []
+        invalid = await client.patch("/api/v1/proactive/settings",
+                                     json={"after_reply_max_rounds": 9}, headers=headers)
+        assert invalid.status_code == 422
+
+
 async def test_proactive_settings_api_and_manual_send(db, actor, seeded_scope, tmp_path):
     provider = ProactiveProvider()
     app = client_app(db, actor, tmp_path, provider=provider)

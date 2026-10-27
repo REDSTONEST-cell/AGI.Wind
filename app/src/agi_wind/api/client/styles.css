@@ -1237,3 +1237,10 @@ body.memory-drawer-open { overflow: hidden; }
 .qq-group-copy small { color: var(--text-2); font-size: 11px; }
 .qq-group-switch { flex: 0 0 auto; display: inline-flex; align-items: center; }
 
+/* ---------- cognition (rounds/steps) ---------- */
+.cognition-state { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 1px 7px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--line)); border-radius: 999px; background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); font-size: 11px; line-height: 1.6; white-space: nowrap; }
+.cognition-state[hidden] { display: none; }
+.cognition-state.active { animation: cognition-pulse 1.8s ease-in-out infinite; }
+@keyframes cognition-pulse { 0%, 100% { opacity: .72; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .cognition-state.active { animation: none; } }
+

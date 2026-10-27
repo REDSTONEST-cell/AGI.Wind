@@ -1,6 +1,6 @@
-from sqlalchemy import Table, Column, Text, Integer, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
-from ..archive.models import metadata, idcol, fk, js, ts
+from sqlalchemy import Table, Column, Text, Integer, ForeignKey, UniqueConstraint, DateTime, Index, CheckConstraint, text
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from ..archive.models import metadata, idcol, fk, js, ts, now
 
 generation_stream_events = Table("generation_stream_events", metadata, idcol(), fk("generation_id", "generations"), Column("sequence", Integer, nullable=False), Column("type", Text, nullable=False), js("payload"), Column("epoch", Integer, nullable=False), ts(), UniqueConstraint("generation_id", "sequence"))
 conversation_live_events = Table("conversation_live_events", metadata, idcol(), fk("conversation_id", "conversations"), Column("sequence", Integer, nullable=False), Column("type", Text, nullable=False), js("payload"), ts(), UniqueConstraint("conversation_id", "sequence"))
@@ -20,3 +20,35 @@ proactive_messages = Table(
     ts(),
 )
 DELIVERY_TABLES = ["generation_stream_events", "conversation_live_events", "delivery_commands", "speech_segments", "avatar_cues", "playback_receipts"]
+
+# Operational "after reply" cognition runs. Derived runtime state, deliberately excluded
+# from archive exports; conversation deletion cascades the rows.
+idle_cognition_runs = Table(
+    "idle_cognition_runs",
+    metadata,
+    idcol(),
+    Column("account_id", UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False),
+    Column("companion_id", UUID(as_uuid=True), ForeignKey("companions.id", ondelete="CASCADE"), nullable=False),
+    Column("conversation_id", UUID(as_uuid=True), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False),
+    Column("trigger_generation_id", UUID(as_uuid=True), ForeignKey("generations.id", ondelete="SET NULL")),
+    Column("trigger_event_id", UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL")),
+    Column("message_event_id", UUID(as_uuid=True), ForeignKey("events.id", ondelete="SET NULL")),
+    Column("due_at", DateTime(timezone=True), nullable=False),
+    Column("state", Text, nullable=False, default="pending", server_default="pending"),
+    Column("decision", Text, nullable=False, default="", server_default=""),
+    Column("reason", Text, nullable=False, default="", server_default=""),
+    Column("error_code", Text),
+    Column("rounds_used", Integer, nullable=False, default=0, server_default="0"),
+    Column("steps_used", Integer, nullable=False, default=0, server_default="0"),
+    Column("steps", JSONB, nullable=False, default=list),
+    Column("attempts", Integer, nullable=False, default=0, server_default="0"),
+    Column("lease_until", DateTime(timezone=True)),
+    Column("scheduled_at", DateTime(timezone=True), nullable=False, default=now),
+    Column("finished_at", DateTime(timezone=True)),
+    ts(),
+    ts("updated_at"),
+    CheckConstraint("state IN ('pending','running','sent','silent','skipped','cancelled','failed')", name="idle_cognition_runs_state_check"),
+)
+Index("idle_cognition_runs_active_uniq", idle_cognition_runs.c.conversation_id, unique=True,
+      postgresql_where=text("state IN ('pending','running')"))
+Index("idle_cognition_runs_due_idx", idle_cognition_runs.c.state, idle_cognition_runs.c.due_at)

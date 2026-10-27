@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 import random
+import time
 from uuid import UUID, uuid4
 from sqlalchemy import select, text
 from ..archive import models as m
@@ -70,8 +71,12 @@ class GenerationService:
         self.agent_settings=None
         self.agent_secret_store=None
         self.notify=None
+        # Set by the gateway; None keeps tests and standalone service instances unchanged.
+        self.idle_cognition=None
 
     async def submit(self, actor, request):
+        if self.idle_cognition is not None:
+            self.idle_cognition.cancel_conversation(request.conversation_id, "user_message")
         return await self.archive.accept(actor, request, model_ref=self.model, runtime=self.runtime_name)
 
     async def interrupt(self, actor, generation_id, command_id):
@@ -115,6 +120,8 @@ class GenerationService:
                         content["voice"]={**content["voice"],"state":"cancelled","error_code":"SPEECH_CANCELLED"}
                     conn.execute(m.events.update().where(m.events.c.id==row["id"]).values(content=content,content_sha256=digest(content)))
         if upstream and task is not asyncio.current_task(): task.cancel()
+        if self.idle_cognition is not None:
+            self.idle_cognition.cancel_conversation(scope.conversation_id, "generation_interrupted")
         return result
 
     def replay(self, actor, generation_id, after_sequence=0):
@@ -133,6 +140,8 @@ class GenerationService:
             lease.commit()
             if not acquired: return False
             try:
+                run_started = time.monotonic()
+                cognition = {"rounds": 1, "steps": 1, "tool_calls": 0, "duration_ms": 0}
                 with self.db.engine.begin() as conn:
                     lock(conn, scope.companion_id)
                     generation, request, scope = generation_scope(conn, generation_id)
@@ -179,7 +188,7 @@ class GenerationService:
                 async def reply_chunks():
                     if agent_turn:
                         from ..agent.delivery import run_agent
-                        yield await run_agent(self,generation_id,scope,generation,provider,model,messages)
+                        yield await run_agent(self,generation_id,scope,generation,provider,model,messages,stats=cognition)
                     else:
                         stream_reply = getattr(provider,'stream_realtime',provider.stream) if realtime else provider.stream
                         async for chunk in stream_reply(model,messages): yield chunk
@@ -235,7 +244,7 @@ class GenerationService:
 
                 async for delta in reply_chunks():
                     if not isinstance(delta,str) and delta.kind=='reasoning':
-                        await self.record_reasoning(generation_id,scope,generation,'reply',delta.text)
+                        await self.record_reasoning(generation_id,scope,generation,'reply',delta.text,round_no=1,step_no=1)
                         continue
                     delta=delta if isinstance(delta,str) else delta.text
                     visible=emotion_stream.feed(delta)
@@ -333,6 +342,11 @@ class GenerationService:
                         emit(conn, generation_id, "warning", {"code": voice_warning[0], "message": voice_warning[1]}, generation["epoch"])
                     if request["output"].get("avatar"):
                         emit(conn, generation_id, "warning", {"code":"AVATAR_UNAVAILABLE", "message":"文字已完成，形象服务尚未配置"}, generation["epoch"])
+                    cognition["duration_ms"] = int((time.monotonic() - run_started) * 1000)
+                    content = dict(conn.scalar(select(m.events.c.content).where(m.events.c.id==row['id'])) or {})
+                    content['cognition'] = cognition
+                    conn.execute(m.events.update().where(m.events.c.id==row['id']).values(content=content,content_sha256=digest(content)))
+                    emit(conn, generation_id, "cognition.completed", cognition, generation["epoch"])
                     emit(conn, generation_id, "generation.completed", {}, generation["epoch"])
                     conn.execute(m.generations.update().where(m.generations.c.id == generation_id).values(state="completed", finished_at=m.now()))
                     if self.memory_extraction_enabled:
@@ -340,6 +354,11 @@ class GenerationService:
                         enqueue_extraction(conn, scope, generation_id)
                         if getattr(scope, "scene", "owner_private") == "group" and getattr(scope, "room_id", None):
                             enqueue_member_extraction(conn, scope, generation_id)
+                if self.idle_cognition is not None:
+                    try:
+                        self.idle_cognition.schedule_after_completion(scope, generation_id)
+                    except Exception:
+                        logger.warning("idle cognition schedule failed generation=%s", generation_id, exc_info=True)
                 for item, result in queued_segments:
                     try:
                         self.voice.start(
@@ -390,8 +409,8 @@ class GenerationService:
             conn.execute(m.events.update().where(m.events.c.id==row['id']).values(content=content,content_sha256=digest(content)))
             if event_type: emit(conn,generation_id,event_type,payload or {},generation['epoch'])
 
-    async def record_reasoning(self,generation_id,scope,generation,stage,text):
-        payload={'stage':stage,'text':''}
+    async def record_reasoning(self,generation_id,scope,generation,stage,text,round_no=None,step_no=None):
+        payload={'stage':stage,'text':'','round':round_no,'step':step_no}
         def mutate(conn,content,row):
             existing=content.get('reasoning','')
             value=text[:max(0,64000-len(existing))]
@@ -399,10 +418,15 @@ class GenerationService:
             content['reasoning']=existing+value
             if len(value)<len(text): content['reasoning_truncated']=True
             trace=content.setdefault('trace',[])
-            step=next((step for step in trace if step['type']=='reasoning' and step['stage']==stage),None)
+            step=next((step for step in trace if step['type']=='reasoning' and step['stage']==stage
+                       and step.get('round')==round_no and step.get('step')==step_no),None)
             if value:
                 if step: step['text']+=value
-                else: trace.append({'type':'reasoning','stage':stage,'text':value})
+                else:
+                    entry={'type':'reasoning','stage':stage,'text':value}
+                    if round_no is not None: entry['round']=round_no
+                    if step_no is not None: entry['step']=step_no
+                    trace.append(entry)
         await self.update_output(generation_id,scope,generation,mutate,'reasoning.delta',payload)
 
     async def reasoning_completed(self,generation_id,scope,generation,stage):

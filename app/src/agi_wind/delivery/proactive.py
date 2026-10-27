@@ -61,6 +61,9 @@ class ProactiveService:
         self.archive = archive or ArchiveService(db)
         self._now_fn = now_fn
         self._inflight: set = set()
+        # Set by the gateway; lets a delivered proactive message cancel any pending
+        # after-reply cognition for the same conversation.
+        self.idle_cognition = None
 
     def now(self) -> datetime:
         if self._now_fn is not None:
@@ -204,6 +207,41 @@ class ProactiveService:
         messages.append({"role": "user", "content": "（系统提示：现在没有新的用户消息，轮到你主动发一条消息。）"})
         return messages
 
+    async def deliver(self, actor, conversation, text, *, trigger="schedule", model_ref=None, cancel_pending=True):
+        """Archive and record one already-generated proactive message.
+
+        Idle cognition uses this after its own bounded thinking so the model is not
+        called a second time just to write the message.
+        """
+        text = str(text or "").strip()
+        if not text:
+            return {"sent": False, "reason": "empty"}
+        result = self.archive.create_proactive_message(
+            actor,
+            conversation["id"],
+            text,
+            model_ref=model_ref,
+            runtime="proactive",
+            trigger=trigger,
+        )
+        with self.db.engine.begin() as conn:
+            lock(conn, conversation["companion_id"])
+            conn.execute(
+                dm.proactive_messages.insert().values(
+                    id=uuid4(),
+                    account_id=actor.account_id,
+                    companion_id=conversation["companion_id"],
+                    conversation_id=conversation["id"],
+                    event_id=result["event_id"],
+                    trigger=trigger,
+                )
+            )
+        if cancel_pending and self.idle_cognition is not None:
+            self.idle_cognition.cancel_conversation(conversation["id"], reason="proactive_sent")
+        logger.info("proactive message sent companion=%s conversation=%s trigger=%s",
+                    conversation["companion_id"], conversation["id"], trigger)
+        return {"sent": True, "reason": "ok", **result}
+
     async def send(self, actor, companion_id, *, force=False, trigger="schedule"):
         if companion_id in self._inflight:
             return {"sent": False, "reason": "busy"}
@@ -234,28 +272,7 @@ class ProactiveService:
             text = await self._generate(provider, model, self._messages(context))
             if not text:
                 return {"sent": False, "reason": "empty"}
-            result = self.archive.create_proactive_message(
-                actor,
-                conversation["id"],
-                text,
-                model_ref=model,
-                runtime="proactive",
-                trigger=trigger,
-            )
-            with self.db.engine.begin() as conn:
-                lock(conn, companion_id)
-                conn.execute(
-                    dm.proactive_messages.insert().values(
-                        id=uuid4(),
-                        account_id=actor.account_id,
-                        companion_id=companion_id,
-                        conversation_id=conversation["id"],
-                        event_id=result["event_id"],
-                        trigger=trigger,
-                    )
-                )
-            logger.info("proactive message sent companion=%s conversation=%s trigger=%s", companion_id, conversation["id"], trigger)
-            return {"sent": True, "reason": "ok", **result}
+            return await self.deliver(actor, conversation, text, trigger=trigger, model_ref=model)
         finally:
             self._inflight.discard(companion_id)
 

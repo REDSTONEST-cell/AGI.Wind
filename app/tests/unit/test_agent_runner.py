@@ -123,6 +123,23 @@ async def test_large_tool_result_is_valid_bounded_json():
     assert len(result) <= 1000 and json.loads(result)['truncated'] is True
 
 
+async def test_round_and_step_metadata_is_exposed_on_reasoning_and_tools():
+    steps, trace = [], []
+    async def search(args): return {'items': []}
+    async def log(event): trace.append(event)
+    provider = Scripted([ToolTurn('先查一下', '需要来源', (call(),)), ToolTurn('查完了', '有结果了')])
+    runner = AgentRunner(AgentSettings(enabled=True, max_rounds=3), [ToolSpec('search_memory', '', Query, search)],
+                         on_event=log, on_step=lambda meta: steps.append(dict(meta)))
+    result = await runner.run(provider, MODEL, [{'role': 'user', 'content': '你好'}])
+    assert result.rounds_used == 2 and result.steps_used == 3
+    reasoning_steps = [meta for meta in steps if meta['kind'] == 'reasoning']
+    assert [(meta['round'], meta['step']) for meta in reasoning_steps] == [(1, 1), (2, 3)]
+    running = [event for event in trace if event['status'] == 'running']
+    assert running and running[0]['round'] == 1 and running[0]['step'] == 2
+    completed = [event for event in trace if event['status'] != 'running']
+    assert completed[0]['round'] == running[0]['round']
+
+
 def test_settings_bounds_and_no_arbitrary_search_credential_url():
     assert AgentSettings().enabled is False
     with pytest.raises(ValidationError): AgentSettings(max_rounds=99)

@@ -131,7 +131,7 @@
               <span class="avatar chat-peer-avatar" id="chat-peer-avatar" aria-hidden="true">W</span>
               <div class="chat-peer-copy">
                 <h1 class="chat-peer-name" id="chat-peer-name">她</h1>
-                <p class="chat-peer-sub"><span class="presence" id="chat-presence" data-state="idle">连接中</span><span class="dot-sep" aria-hidden="true">·</span><span id="chat-title">正在准备…</span></p>
+                <p class="chat-peer-sub"><span class="presence" id="chat-presence" data-state="idle">连接中</span><span class="dot-sep" aria-hidden="true">·</span><span id="chat-title">正在准备…</span><span class="cognition-state" id="cognition-state" hidden></span></p>
               </div>
             </div>
             <div class="page-actions">
@@ -586,7 +586,7 @@
               <span class="chip" id="proactive-state">读取中…</span>
             </div>
             <div class="tts-grid">
-              <label class="setting-row span-2"><span><strong>启用主动消息</strong><small>满足下列条件时才会发送</small></span><input id="proactive-enabled" class="switch" type="checkbox"></label>
+              <label class="setting-row span-2"><span><strong>启用主动消息</strong><small>长时间空闲或回复后独处思考满足条件时才会发送</small></span><input id="proactive-enabled" class="switch" type="checkbox"></label>
               <label class="field"><span>空闲多久后（分钟）</span><input id="proactive-idle" class="input" type="number" min="5" max="1440"></label>
               <label class="field"><span>两条之间至少间隔（分钟）</span><input id="proactive-gap" class="input" type="number" min="5" max="1440"></label>
               <label class="field"><span>每天最多</span><input id="proactive-max" class="input" type="number" min="1" max="20"></label>
@@ -595,6 +595,14 @@
                 <label class="field"><span>安静结束</span><input id="proactive-quiet-end" class="input" type="time"></label>
               </div>
             </div>
+            <div class="tts-grid">
+              <label class="setting-row span-2"><span><strong>回复后独处思考</strong><small>回复完约 2–3 分钟没等到你，她会先自己想一想，再决定是否主动来找你</small></span><input id="proactive-after-enabled" class="switch" type="checkbox"></label>
+              <label class="field"><span>无回复后（秒）</span><input id="proactive-after-delay" class="input" type="number" min="30" max="3600"></label>
+              <label class="field"><span>最多思考轮数</span><input id="proactive-after-rounds" class="input" type="number" min="1" max="3"></label>
+              <label class="field"><span>每轮最多步骤</span><input id="proactive-after-steps" class="input" type="number" min="1" max="8"></label>
+              <label class="field"><span>每天最多思考次数</span><input id="proactive-after-runs" class="input" type="number" min="1" max="20"></label>
+            </div>
+            <p class="meta" id="proactive-cognition-meta"></p>
             <p class="meta" id="proactive-meta"></p>
             <div class="form-actions">
               <p class="meta" id="proactive-hint" role="status" aria-live="polite"></p>
@@ -1037,6 +1045,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="/client/app.js?v=20261027segments1"></script>
+  <script type="module" src="/client/app.js?v=20261027cognition3"></script>
 </body>
 </html>

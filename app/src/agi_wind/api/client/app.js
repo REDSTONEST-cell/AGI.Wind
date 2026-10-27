@@ -211,13 +211,32 @@ function appendTermLine(line, { defer = false } = {}) {
 }
 
 // Processing text is only in this page's in-memory drawer, never localStorage/stdout.
+let cognitionHideTimer=null;
+function setCognitionState(text,{active=false,hideAfter=0}={}){
+  const node=$('#cognition-state');
+  if(!node)return;
+  if(cognitionHideTimer){clearTimeout(cognitionHideTimer);cognitionHideTimer=null;}
+  if(!text){node.hidden=true;node.classList.remove('active');node.textContent='';return;}
+  node.textContent=text;node.hidden=false;node.classList.toggle('active',Boolean(active));
+  if(hideAfter>0)cognitionHideTimer=setTimeout(()=>{node.hidden=true;node.classList.remove('active');cognitionHideTimer=null;},hideAfter);
+}
+function cognitionLabel(payload){
+  const round=Number(payload?.round||0), step=Number(payload?.step||0);
+  if(!round&&!step)return '';
+  if(round&&step)return `第 ${round} 轮 · 第 ${step} 步`;
+  if(round)return `第 ${round} 轮`;
+  return `第 ${step} 步`;
+}
 function logProcessing(generationId,type,payload) {
-  const stage=payload.stage==='reflect'?'回答后':'回答前';
+  const stage=payload.stage==='reflect'?'回答后':payload.stage==='idle'?'独处':'回答前';
+  const counter=cognitionLabel(payload);
+  const round=Number(payload?.round||0), step=Number(payload?.step||0);
   if(type==='reasoning.delta'||type==='text.delta'){
-    const key=generationId+':'+type+':'+payload.stage;
+    const key=generationId+':'+type+':'+payload.stage+':'+round+':'+step;
     let line=state.processingLines.get(key);
     if(!line||!state.termLines.includes(line)){
-      line=appendTermLine({cat:'proc',tag:type==='text.delta'?'REPLY':'THINK',text:(type==='text.delta'?'回复正文':stage)+' · '},{defer:true});
+      const prefix=(counter?counter+' · ':'')+(type==='text.delta'?'回复正文':stage);
+      line=appendTermLine({cat:'proc',tag:type==='text.delta'?'REPLY':'THINK',text:prefix+' · '},{defer:true});
       state.processingLines.set(key,line);
       if(state.processingLines.size>100)state.processingLines.delete(state.processingLines.keys().next().value);
     }
@@ -228,11 +247,12 @@ function logProcessing(generationId,type,payload) {
     const rawStatus=payload.status||payload.data?.status;
     const status=type==='tool.started'?'进行中':({completed:'完成',failed:'失败',skipped:'已跳过'}[rawStatus]||rawStatus||'完成');
     const summary=payload.summary||payload.message||payload.data?.summary||'';
-    const text=stage+' · '+toolName+' · '+status+(summary?' · '+summary:'');
+    const text=(counter?counter+' · ':'')+stage+' · '+toolName+' · '+status+(summary?' · '+summary:'');
     const last=state.termLines[state.termLines.length-1];
     if(last&&last.tag==='TOOL'&&last.text===text&&Date.now()-new Date(last.ts).getTime()<3000)return;
     appendTermLine({cat:'proc',tag:'TOOL',level:rawStatus==='failed'?'error':'info',text},{defer:true});
   }
+  if(round||step)setCognitionState('思考 · '+cognitionLabel(payload),{active:true});
   if(!state.logOpen){state.logUnread++;updateLogBadge();return;}
   if(state.processRenderPending)return;
   state.processRenderPending=true;
@@ -253,6 +273,8 @@ function logHistoryProcessing(event) {
     else if(step.type==='tool')logProcessing(key,'tool.completed',step);
   }
   if(!replied&&event.content?.text)logProcessing(key,'text.delta',{stage:'reply',text:stripHiddenReplyPrefix(event.content.text)});
+  // Historical replay fills the log drawer only; the live cognition chip is not "thinking" now.
+  setCognitionState('',{});
 }
 
 function setLogWidth(value,{persist=false}={}) {
@@ -1020,9 +1042,27 @@ function startLiveWatch(conversationId) {
           onEvent: (event) => {
             const sequence = Number((event.data && event.data.sequence) || event.id || 0);
             if (sequence > watcher.cursor) watcher.cursor = sequence;
-            if (event.type !== 'proactive.message') return;
             const payload = (event.data && event.data.payload) || {};
-            appendProactive(payload);
+            if (event.type === 'proactive.message') { appendProactive(payload); return; }
+            if (event.type === 'idle_cognition.started') {
+              setCognitionState('独处思考中…',{active:true});
+              appendTermLine({cat:'proc',tag:'THINK',text:'独处思考开始 · 先自己想一想'},{defer:true});
+              return;
+            }
+            if (event.type === 'idle_cognition.step') {
+              const round=Number(payload.round||0), step=Number(payload.step||0);
+              setCognitionState(`独处思考 · 第 ${round} 轮 / 第 ${step} 步`,{active:true});
+              logProcessing('idle:'+String(payload.run_id||'run'),'reasoning.delta',
+                {stage:'idle',round,step,text:String(payload.text||'')});
+              return;
+            }
+            if (event.type === 'idle_cognition.completed') {
+              const sent=payload.decision==='reach_out';
+              setCognitionState(sent?'独处思考 · 决定来找你':'独处思考 · 这次保持安静',{hideAfter:5000});
+              if(!state.logOpen){state.logUnread++;updateLogBadge();}
+              else renderTerm();
+              return;
+            }
           },
         });
       } catch (error) {
@@ -2181,6 +2221,7 @@ function scrollToEnd(force = false) {
 function clearChat() {
   stopLiveWatch();
   stopAllAudio();
+  setCognitionState('',{});
   $('#messages').replaceChildren();
   delete $('#messages').dataset.lastMessageAt;
   $('#chat-empty').hidden = false;
@@ -2585,6 +2626,7 @@ async function sendMessage(text) {
   setBusy(true);
   let failed = false;
   const startedAt = performance.now();
+  setCognitionState('思考中…',{active:true});
   let firstDeltaAt = null;
   let received = '';
   let eventCount = 0;
@@ -2592,6 +2634,7 @@ async function sendMessage(text) {
   let speechPayload = null;
   let segmentsSeen = false;
   let generationCompleted = false;
+  let cognitionSummary = false;
   logEvent('chat', '发送消息', text.slice(0, 90) + (text.length > 90 ? '…' : '') + ' · ' + text.length + ' 字', {
     conversation_id: state.conversation.id,
     characters: text.length,
@@ -2661,14 +2704,21 @@ async function sendMessage(text) {
       } else if (event.type === 'warning' && payload.message) {
         toast(payload.message);
         logEvent('system', '服务提示', payload.message);
+      } else if(event.type==='cognition.completed') {
+        cognitionSummary = true;
+        if(Number(payload.rounds||0)||Number(payload.steps||0)){
+          setCognitionState(`本轮 ${Number(payload.rounds||0)} 轮 · ${Number(payload.steps||0)} 步`,{hideAfter:6000});
+        }
       } else if (event.type === 'generation.completed') {
         terminalReceived = true;
         generationCompleted = true;
+        if(!cognitionSummary)setCognitionState('',{});
         turn.finish('completed');
         if(turn.hasVoiceSegments())startVoiceWatchSegments(accepted.generation_id,turn);
       } else if (event.type === 'generation.failed') {
         failed = true;
         terminalReceived = true;
+        setCognitionState('',{});
         turn.finish('failed');
         const failedTarget=turn.last();
         if(failedTarget)markFailed(failedTarget, payload.code || 'GENERATION_FAILED', failedTarget.partText||'');
@@ -2679,6 +2729,7 @@ async function sendMessage(text) {
         });
       } else if (event.type === 'generation.cancelled') {
         terminalReceived = true;
+        setCognitionState('',{});
         turn.finish('cancelled');
         const cancelledTarget=turn.last();
         if(cancelledTarget)cancelledTarget.meta.append(el('span', { text: '已停止' }));
@@ -3592,7 +3643,24 @@ async function loadProactiveSettings() {
     $('#proactive-max').value = data.max_per_day;
     $('#proactive-quiet-start').value = data.quiet_start;
     $('#proactive-quiet-end').value = data.quiet_end;
+    $('#proactive-after-enabled').checked = data.after_reply_enabled !== false;
+    $('#proactive-after-delay').value = data.after_reply_delay_seconds ?? 150;
+    $('#proactive-after-rounds').value = data.after_reply_max_rounds ?? 2;
+    $('#proactive-after-steps').value = data.after_reply_max_steps ?? 4;
+    $('#proactive-after-runs').value = data.after_reply_max_runs_per_day ?? 6;
     $('#proactive-state').textContent = data.enabled ? '已开启' : '已关闭';
+    const cognition = data.recent_cognition;
+    if (cognition) {
+      const stateLabels = {pending:'等待中', running:'思考中', sent:'主动发了消息', silent:'保持安静',
+        skipped:'跳过', cancelled:'已取消', failed:'思考失败'};
+      const rounds = Number(cognition.rounds_used || 0);
+      const steps = Number(cognition.steps_used || 0);
+      $('#proactive-cognition-meta').textContent = '最近一次独处思考：' + (stateLabels[cognition.state] || cognition.state)
+        + (rounds || steps ? ' · ' + rounds + ' 轮 / ' + steps + ' 步' : '')
+        + (cognition.reason ? ' · ' + proactiveReasonLabel(cognition.reason) : '');
+    } else {
+      $('#proactive-cognition-meta').textContent = '还没有独处思考记录。';
+    }
     const parts = [];
     if (Number.isFinite(Number(data.sent_today))) parts.push('今天已发 ' + data.sent_today + ' 条');
     if (data.last_sent_at) {
@@ -3616,6 +3684,16 @@ function proactiveReasonLabel(reason) {
     daily_cap: '已达到今日上限',
     quiet_hours: '处于安静时段',
     model_unconfigured: '对话模型未配置',
+    conversation_changed: '用户已发了新消息',
+    source_gone: '原来的回复已不可用',
+    runs_cap: '今天思考次数已用完',
+    round_limit: '思考轮数用尽后保持安静',
+    limit_reached: '思考和步骤预算用尽',
+    empty_message: '决定主动开口但没有有效内容',
+    invalid_output: '思考结果格式无效',
+    cognition_timeout: '独处思考超时',
+    proactive_sent: '已有主动消息发出',
+    user_replied: '用户已经回复',
   })[reason] || reason;
 }
 
@@ -3636,6 +3714,11 @@ async function saveProactiveSettings(event) {
         max_per_day: Number($('#proactive-max').value),
         quiet_start: $('#proactive-quiet-start').value,
         quiet_end: $('#proactive-quiet-end').value,
+        after_reply_enabled: $('#proactive-after-enabled').checked,
+        after_reply_delay_seconds: Number($('#proactive-after-delay').value),
+        after_reply_max_rounds: Number($('#proactive-after-rounds').value),
+        after_reply_max_steps: Number($('#proactive-after-steps').value),
+        after_reply_max_runs_per_day: Number($('#proactive-after-runs').value),
       },
     });
     $('#proactive-state').textContent = data.enabled ? '已开启' : '已关闭';
