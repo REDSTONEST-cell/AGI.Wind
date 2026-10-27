@@ -16,6 +16,7 @@ from ..memory.context import ContextBuilder
 from ..voice.emotion import EmotionTagStream
 from ..voice.text import clean_for_speech
 from . import models as d
+from .reasoning import ReasoningBuffer
 from .segments import ReplySegmenter
 from .stream import emit, emit_live, to_event, finish_open_tools
 
@@ -293,10 +294,13 @@ class GenerationService:
                         self.assert_current(conn, generation_id, context.memory_revision, generation["epoch"])
                         emit(conn, generation_id, "text.segment", payload, generation["epoch"])
 
+                thinking=ReasoningBuffer(lambda value: self.record_reasoning(
+                    generation_id,scope,generation,'reply',value,round_no=1,step_no=1))
                 async for delta in reply_chunks():
                     if not isinstance(delta,str) and delta.kind=='reasoning':
-                        await self.record_reasoning(generation_id,scope,generation,'reply',delta.text,round_no=1,step_no=1)
+                        await thinking.add(delta.text)
                         continue
+                    await thinking.flush()
                     delta=delta if isinstance(delta,str) else delta.text
                     visible=emotion_stream.feed(delta)
                     if not visible: continue
@@ -307,6 +311,7 @@ class GenerationService:
                         emit(conn, generation_id, "text.delta", {"text":visible}, generation["epoch"])
                     for completed in segmenter.feed(visible):
                         await handle_segment(completed)
+                await thinking.flush()
                 tail=emotion_stream.flush()
                 if tail:
                     with self.db.engine.begin() as conn:

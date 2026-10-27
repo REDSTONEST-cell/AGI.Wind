@@ -63,6 +63,7 @@ class MemoryService:
             # Structured facts match either their normalized statement or the original event
             # wording. The latter lets a user ask "你以后叫我什么" and still find a fact stored
             # as "用户希望被称为小风" when the source quote says "以后叫我小风".
+            # An empty or_() is deprecated in SQLAlchemy and will become an error.
             source_match = exists(
                 select(mm.source_refs.c.id)
                 .join(e, mm.source_refs.c.event_id == e.c.id)
@@ -73,9 +74,7 @@ class MemoryService:
                     e.c.visibility == "visible",
                     or_(*[e.c.content["text"].astext.ilike("%" + token + "%") for token in query_terms]),
                 )
-            )
-            if not query_terms:
-                source_match = False
+            ) if query_terms else False
             structured = list(conn.execute(
                 select(mm.memory_items)
                 .where(

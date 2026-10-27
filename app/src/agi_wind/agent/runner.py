@@ -15,9 +15,16 @@ class ToolSpec:
     arguments: type[BaseModel]
     execute: Callable
     authorize: Callable | None = None
+    # Seconds (or a callable returning seconds) for tools whose own bounded work,
+    # such as a command timeout, may outlast the generic per-tool timeout.
+    timeout: Callable | float | None = None
 
     def definition(self):
         return {'type': 'function', 'function': {'name': self.name, 'description': self.description, 'parameters': self.arguments.model_json_schema()}}
+
+    def execution_timeout(self, default):
+        value = self.timeout() if callable(self.timeout) else self.timeout
+        return default if value is None else max(default, float(value))
 
 
 @dataclass(frozen=True)
@@ -26,6 +33,10 @@ class AgentResult:
     calls_used: int
     rounds_used: int = 0
     steps_used: int = 0
+
+
+class _InvalidArguments(Exception):
+    pass
 
 
 async def noop(*args): pass
@@ -50,16 +61,33 @@ class AgentRunner:
         self.settings = settings.model_copy(deep=True)
         self.tools = {tool.name: tool for tool in tools}
         self.on_event, self.on_reasoning, self.on_step, self.check_current = on_event, on_reasoning, on_step, check_current
+        self._budget = None
 
     async def run(self, provider, model, messages):
         if not self.settings.enabled: raise AppError('AGENT_DISABLED', 'Agent 能力已关闭', 409)
         if not callable(getattr(provider, 'tool_turn', None)):
             raise AppError('AGENT_MODEL_UNSUPPORTED', '当前模型连接不支持工具调用', 422)
         try:
-            async with asyncio.timeout(self.settings.total_timeout_seconds):
+            async with asyncio.timeout(self.settings.total_timeout_seconds) as budget:
+                self._budget = budget
                 return await self._run(provider, model, list(messages))
         except TimeoutError:
             raise AppError('AGENT_TIMEOUT', 'Agent 本轮已达到总时间上限', 504) from None
+        finally:
+            self._budget = None
+
+    async def _authorize(self, spec, args):
+        """Waiting for a human approval must not spend the model/tool time budget."""
+        budget = self._budget
+        if budget is None or budget.expired() or budget.when() is None:
+            return await spec.authorize(args)
+        loop = asyncio.get_running_loop()
+        remaining = budget.when() - loop.time()
+        budget.reschedule(None)
+        try:
+            await spec.authorize(args)
+        finally:
+            budget.reschedule(loop.time() + max(0.0, remaining))
 
     async def _run(self, provider, model, messages):
         used, seen, step = 0, set(), 0
@@ -107,16 +135,20 @@ class AgentRunner:
                     used += 1
                     spec = self.tools.get(call.name)
                     if spec is None: raise AppError('TOOL_NOT_ALLOWED', '工具未启用或不可用', 403)
-                    if len(call.arguments) > 6000: raise ValueError('arguments too long')
-                    args = spec.arguments.model_validate_json(call.arguments)
-                    if spec.authorize: await spec.authorize(args)
+                    try:
+                        if len(call.arguments) > 6000: raise ValueError('arguments too long')
+                        args = spec.arguments.model_validate_json(call.arguments)
+                    except (ValidationError, ValueError, TypeError):
+                        # Only argument parsing maps here; a tool's own ValueError is a tool failure.
+                        raise _InvalidArguments() from None
+                    if spec.authorize: await self._authorize(spec, args)
                     await self.check_current()
-                    async with asyncio.timeout(self.settings.tool_timeout_seconds):
+                    async with asyncio.timeout(spec.execution_timeout(self.settings.tool_timeout_seconds)):
                         value = await spec.execute(args)
                     await self.check_current()
                     encoded = bounded_json(value, self.settings.max_result_chars)
                     completed = {**event, 'status': 'completed', 'summary': '工具调用完成', 'result': json.loads(encoded)}
-                except (ValidationError, ValueError, TypeError):
+                except _InvalidArguments:
                     encoded = json.dumps({'error': 'TOOL_ARGUMENTS_INVALID', 'message': '工具参数不符合定义'}, ensure_ascii=False)
                     completed = {**event, 'status': 'failed', 'summary': '工具参数无效', 'code': 'TOOL_ARGUMENTS_INVALID'}
                 except TimeoutError:

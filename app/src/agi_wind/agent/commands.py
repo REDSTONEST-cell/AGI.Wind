@@ -12,6 +12,8 @@ import locale
 from pathlib import Path
 import subprocess
 import sys
+import threading
+import time
 
 from pydantic import Field
 
@@ -102,16 +104,34 @@ class CommandTools:
         if mode != "full" and approved_cwd != str(cwd):
             raise AppError("TOOL_APPROVAL_REQUIRED", "需要先批准此命令", 403)
         await self.check_current()
-        return await asyncio.to_thread(
+        # A worker thread cannot be cancelled; the stop event lets Stop, the turn
+        # deadline or a cancelled generation terminate the child process too.
+        stop = threading.Event()
+        worker = asyncio.ensure_future(asyncio.to_thread(
             self.run,
             args.command,
             cwd,
             policy.command_timeout_seconds,
             policy.command_max_output_chars,
-        )
+            stop,
+        ))
+        worker.add_done_callback(lambda future: future.cancelled() or future.exception())
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            stop.set()
+            try:
+                await asyncio.wait_for(asyncio.shield(worker), timeout=10)
+            except BaseException:
+                pass
+            raise
+
+    def execution_timeout(self):
+        # Let the command's own timeout fire first and report COMMAND_TIMEOUT.
+        return self.settings().command_timeout_seconds + 10
 
     @staticmethod
-    def run(command, cwd, timeout, max_output):
+    def run(command, cwd, timeout, max_output, stop=None):
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         try:
             process = subprocess.Popen(
@@ -125,15 +145,25 @@ class CommandTools:
             )
         except OSError:
             raise AppError("COMMAND_START_FAILED", "命令启动失败", 422) from None
-        try:
-            stdout, stderr = process.communicate(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            CommandTools.terminate(process)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
             try:
-                stdout, stderr = process.communicate(timeout=5)
-            except (subprocess.TimeoutExpired, OSError):
-                stdout, stderr = b"", b""
-            raise AppError("COMMAND_TIMEOUT", "命令执行超时，已被终止", 408) from None
+                # communicate() may be retried after TimeoutExpired without losing output.
+                stdout, stderr = process.communicate(timeout=max(0.01, min(0.25, remaining)))
+                break
+            except subprocess.TimeoutExpired:
+                cancelled = stop is not None and stop.is_set()
+                if not cancelled and remaining > 0.25:
+                    continue
+                CommandTools.terminate(process)
+                try:
+                    process.communicate(timeout=5)
+                except (subprocess.TimeoutExpired, OSError, ValueError):
+                    pass
+                if cancelled:
+                    raise AppError("COMMAND_CANCELLED", "命令已随本轮停止而终止", 409) from None
+                raise AppError("COMMAND_TIMEOUT", "命令执行超时，已被终止", 408) from None
         out_text, err_text = _decode_output(stdout), _decode_output(stderr)
         truncated = len(out_text) > max_output or len(err_text) > max_output
         return {
@@ -175,5 +205,6 @@ class CommandTools:
                 CommandArgs,
                 self.execute,
                 self.authorization(),
+                self.execution_timeout,
             )
         ]

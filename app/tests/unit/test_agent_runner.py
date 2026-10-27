@@ -145,3 +145,41 @@ def test_settings_bounds_and_no_arbitrary_search_credential_url():
     with pytest.raises(ValidationError): AgentSettings(max_rounds=99)
     with pytest.raises(ValidationError): AgentSettings(search_url='https://secret@host.invalid/search')
     with pytest.raises(ValidationError): AgentSettings(search_url='file:///etc/passwd')
+
+
+async def test_human_approval_wait_does_not_spend_the_turn_budget():
+    seen = []
+    async def approve(args): await asyncio.sleep(0.3)
+    async def search(args): seen.append(args.query); return {'ok': True}
+    provider = Scripted([ToolTurn(tool_calls=(call(),)), ToolTurn('批准后完成')])
+    settings = AgentSettings(enabled=True).model_copy(update={'total_timeout_seconds': 0.2})
+    spec = ToolSpec('search_memory', '', Query, search, approve)
+    result = await AgentRunner(settings, [spec]).run(provider, MODEL, [])
+    assert result.text == '批准后完成' and seen == ['称呼']
+
+
+async def test_turn_budget_still_applies_outside_the_approval_wait():
+    async def approve(args): pass
+    async def slow(args): await asyncio.sleep(1)
+    provider = Scripted([ToolTurn(tool_calls=(call(),)), ToolTurn('不会到这里')])
+    settings = AgentSettings(enabled=True).model_copy(update={'total_timeout_seconds': 0.1})
+    with pytest.raises(AppError) as error:
+        await AgentRunner(settings, [ToolSpec('search_memory', '', Query, slow, approve)]).run(provider, MODEL, [])
+    assert error.value.code == 'AGENT_TIMEOUT'
+
+
+async def test_tool_specific_timeout_extends_the_generic_tool_timeout():
+    async def slow(args): await asyncio.sleep(0.05); return {'done': True}
+    provider = Scripted([ToolTurn(tool_calls=(call(),)), ToolTurn('完成')])
+    settings = AgentSettings(enabled=True, tool_timeout_seconds=0.01)
+    spec = ToolSpec('search_memory', '', Query, slow, timeout=lambda: 1)
+    await AgentRunner(settings, [spec]).run(provider, MODEL, [])
+    assert 'done' in provider.requests[-1]['messages'][-1]['content']
+
+
+async def test_value_error_inside_a_tool_is_not_reported_as_invalid_arguments():
+    async def broken(args): raise ValueError('internal detail')
+    provider = Scripted([ToolTurn(tool_calls=(call(),)), ToolTurn('工具失败了')])
+    await AgentRunner(AgentSettings(enabled=True), [ToolSpec('search_memory', '', Query, broken)]).run(provider, MODEL, [])
+    content = provider.requests[-1]['messages'][-1]['content']
+    assert 'TOOL_FAILED' in content and 'TOOL_ARGUMENTS_INVALID' not in content and 'internal detail' not in content
