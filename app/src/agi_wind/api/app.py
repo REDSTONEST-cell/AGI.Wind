@@ -116,10 +116,19 @@ class ProactiveSettingsPatch(DTO):
     quiet_start:str|None=Field(default=None,max_length=5)
     quiet_end:str|None=Field(default=None,max_length=5)
     after_reply_enabled:bool|None=None
+    after_reply_qq_enabled:bool|None=None
+    after_reply_tools_enabled:bool|None=None
+    after_reply_media_enabled:bool|None=None
+    after_reply_max_tool_calls:int|None=Field(default=None,ge=0,le=3)
     after_reply_delay_seconds:int|None=Field(default=None,ge=30,le=3600)
     after_reply_max_rounds:int|None=Field(default=None,ge=1,le=3)
     after_reply_max_steps:int|None=Field(default=None,ge=1,le=8)
     after_reply_max_runs_per_day:int|None=Field(default=None,ge=1,le=20)
+    continuation_enabled:bool|None=None
+    continuation_max_rounds:int|None=Field(default=None,ge=1,le=12)
+    continuation_max_messages:int|None=Field(default=None,ge=1,le=5)
+    continuation_max_wait_seconds:int|None=Field(default=None,ge=10,le=3600)
+    continuation_lifetime_minutes:int|None=Field(default=None,ge=1,le=120)
 class ProactiveSendRequest(DTO): companion_id:UUID
 class ExportRequest(DTO): companion_id:UUID
 class StickerCreate(DTO):
@@ -320,7 +329,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         proactive_task=asyncio.create_task(proactive_loop())
         async def idle_cognition_loop():
             while not closing.is_set():
-                if settings.proactive.enabled and settings.proactive.after_reply_enabled:
+                if settings.proactive.enabled:
                     try:
                         await idle_cognition.tick()
                     except Exception:
@@ -729,6 +738,14 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     async def delete_conversation(conversation_id:UUID,current=Depends(authenticate)):
         return await deletion.delete_conversation(current,conversation_id)
 
+    @app.get("/api/v1/conversations/{conversation_id}/live-cursor")
+    def live_cursor(conversation_id:UUID,current=Depends(authenticate)):
+        with db.engine.connect() as conn:
+            authorized_conversation(conn,current,conversation_id)
+            sequence=conn.scalar(select(func.max(dm.conversation_live_events.c.sequence)).where(
+                dm.conversation_live_events.c.conversation_id==conversation_id)) or 0
+        return {'sequence':int(sequence)}
+
     @app.get("/api/v1/conversations/{conversation_id}/live")
     async def control(conversation_id:UUID,after:int=0,current=Depends(authenticate)):
         with db.engine.connect() as conn: authorized_conversation(conn,current,conversation_id)
@@ -1015,6 +1032,10 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         with SETTINGS_WRITE_LOCK:
             settings.proactive=updated
             persist_settings(settings)
+        if body.enabled is False:
+            idle_cognition.cancel_actor(current,reason='disabled')
+        elif body.continuation_enabled is False:
+            idle_cognition.cancel_continuations(current)
         logger.info("proactive settings updated enabled=%s idle=%s gap=%s max=%s",updated.enabled,updated.min_idle_minutes,updated.min_gap_minutes,updated.max_per_day)
         return proactive_view(current)
 
@@ -1024,9 +1045,12 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
         result=await proactive.send(current,body.companion_id,force=True,trigger="manual")
         if not result.get("sent"):
             reason=result.get("reason") or "unknown"
+            if reason in ('silent','empty_message','waiting'):
+                return result
             if reason=="model_unconfigured": raise AppError("MODEL_UNCONFIGURED","请先配置聊天厂商和模型",503)
             if reason=="no_active_conversation": raise AppError("NO_ACTIVE_CONVERSATION","当前没有进行中的对话",409)
             if reason=="empty": raise AppError("PROACTIVE_EMPTY","模型没有生成内容，请稍后再试",502)
+            if reason=='invalid_output': raise AppError('WAKE_INVALID_OUTPUT','唤醒决定格式无效，本次未发送',502)
             raise AppError("PROACTIVE_BUSY","正在发送主动消息，请稍后再试",409)
         return result
 

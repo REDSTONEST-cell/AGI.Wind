@@ -8,11 +8,18 @@ export function createRealtimeCall(client, hooks) {
   const mute = document.querySelector('#call-mute');
   let active = false, starting = false, muted = false, session = 0, epoch = 0;
   let socket, stream, context, capture, source, player, ping, turn;
-  let conversationId = '', rate = 24000, lastUtterance = 0;
+  let conversationId = '', callId = '', rate = 24000, lastUtterance = 0;
+  let speechStarted = false, speechCredits = 0, pendingSpeech = [];
   let cancelling = Promise.resolve();
   const send = (value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const label = (text) => { status.textContent = text; };
   const log = (text, data = {}) => hooks.log?.(text, data);
+  function drainSpeech() {
+    while (active && !muted && speechCredits > 0 && pendingSpeech.length) {
+      send({type:'speak', epoch, text:pendingSpeech.shift()});
+      speechCredits -= 1;
+    }
+  }
   async function cancelGeneration(previous) {
     if (!previous) return;
     previous.cancelled = true;
@@ -28,6 +35,7 @@ export function createRealtimeCall(client, hooks) {
   }
   function interrupt() {
     epoch += 1;
+    pendingSpeech = []; speechCredits = 0;
     player?.stop();
     hooks.stopAudio?.();
     const previous = turn; turn = null;
@@ -46,11 +54,11 @@ export function createRealtimeCall(client, hooks) {
     let received = '', terminal = false, first = true;
     const started = performance.now();
     const speak = (texts) => {
-      for (const text of texts) if (active && !current.cancelled && version === epoch) send({type:'speak', epoch:version, text});
+      if (active && !current.cancelled && version === epoch) { pendingSpeech.push(...texts); drainSpeech(); }
     };
     try {
       current.accepting = client.chat({request_id:crypto.randomUUID(), conversation_id:conversationId,
-        input:{text, asset_ids:[]}, output:{voice:'off'}, device_id:'web-realtime-call'});
+        input:{text, asset_ids:[]}, output:{voice:'off', realtime:true}, device_id:callId});
       const accepted = await current.accepting;
       current.accepted = accepted;
       if (current.cancelled || !active || expectedSession !== session || version !== epoch) return;
@@ -97,17 +105,22 @@ export function createRealtimeCall(client, hooks) {
     }
     const value = JSON.parse(event.data);
     if (value.type === 'speech_start' && !muted) {
-      // No barge-in: once she is speaking, let her finish the reply.
-      if (turn || player?.playing) return;
+      void interrupt(); speechStarted = true;
       label('正在听你说…'); caption.textContent = '';
     } else if (value.type === 'partial' && !muted) {
       caption.textContent = value.text;
     } else if (value.type === 'final' && !muted && value.utterance > lastUtterance) {
       lastUtterance = value.utterance;
       caption.textContent = value.text;
-      if (turn || player?.playing) return;
+      // A final may arrive without a VAD start; it must still replace the old turn.
+      if (!speechStarted) void interrupt();
+      speechStarted = false;
       if (/^(?:\/\s*)?(?:stop|停止)[。.!！]?$/i.test(value.text.trim())) { void stop(); return; }
       void reply(value.text, epoch, expectedSession);
+    } else if (value.type === 'speech_reset' && value.epoch === epoch) {
+      speechCredits = Math.min(16, Math.max(0, value.credits || 0)); drainSpeech();
+    } else if (value.type === 'speech_credit' && value.epoch === epoch) {
+      speechCredits = Math.min(16, speechCredits + Math.max(0, value.credits || 0)); drainSpeech();
     } else if (value.type === 'audio_start' && value.epoch === epoch) {
       rate = value.sample_rate || 24000;
     } else if (value.type === 'speech_end' && !turn && !muted) {
@@ -123,7 +136,8 @@ export function createRealtimeCall(client, hooks) {
     }
     starting = true; const expectedSession = ++session;
     button.setAttribute('aria-pressed','true'); button.textContent = '挂断'; panel.hidden = false;
-    label('连接语音服务…'); caption.textContent = ''; muted = false; lastUtterance = 0; epoch = 0;
+    label('连接语音服务…'); caption.textContent = ''; muted = false; lastUtterance = 0; epoch = 0; speechStarted = false;
+    pendingSpeech = []; speechCredits = 0;
     try {
       const selected = await hooks.prepare();
       if (!selected || expectedSession !== session) { if (expectedSession === session) await stop(); return; }
@@ -135,6 +149,8 @@ export function createRealtimeCall(client, hooks) {
       conversationId = selected;
       const issued = await client.request('/api/v1/call/ticket', {method:'POST', body:{conversation_id:conversationId}, signal:AbortSignal.timeout(5000)});
       if (expectedSession !== session) return;
+      callId = issued.call_id;
+      if (!callId) throw new Error('通话身份无效，请刷新页面重连');
       const url = new URL(client.url('/api/v1/call/stream'), location.href);
       url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       socket = new WebSocket(url); socket.binaryType = 'arraybuffer';
@@ -148,8 +164,12 @@ export function createRealtimeCall(client, hooks) {
           else if (typeof event.data === 'string') { clearTimeout(timer); reject(new Error(JSON.parse(event.data).message || '识别服务未就绪')); }
         };
       });
+      if (expectedSession !== session) return;
+      // The socket can close while the browser permission prompt is still open.
+      socket.onclose = () => { if (expectedSession === session) { hooks.error('通话连接已断开'); void stop(); } };
+      socket.onerror = () => { if (expectedSession === session) void stop(); };
       label('请允许麦克风访问…');
-      const input = await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true}, video:false});
+      const input = hooks.openMicrophone ? await hooks.openMicrophone() : await navigator.mediaDevices.getUserMedia({audio:{channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true}, video:false});
       if (expectedSession !== session) { input.getTracks().forEach(track=>track.stop()); return; }
       stream = input;
       if (context.sampleRate !== 16000) throw new Error('当前浏览器不支持 16kHz 通话音频');
@@ -164,10 +184,7 @@ export function createRealtimeCall(client, hooks) {
       capture = new AudioWorkletNode(context, 'agi-call-capture');
       capture.port.onmessage = (event) => {
         if (!active || muted || expectedSession !== session) return;
-        // While she is replying/speaking, do not upload microphone audio: this
-        // avoids transcribing her own voice through the speakers and lets her
-        // finish the whole reply.
-        if (turn || player?.playing) return;
+        // Browser AEC stays enabled while capturing user speech during playback.
         if (hooks.conversationId() !== conversationId) { void stop(); return; }
         if (socket.bufferedAmount > 64000) { hooks.error('音频连接积压，通话已挂断'); void stop(); return; }
         if (socket.readyState === WebSocket.OPEN) socket.send(event.data);
@@ -181,7 +198,7 @@ export function createRealtimeCall(client, hooks) {
       mute.disabled = false; mute.textContent = '静音'; mute.setAttribute('aria-pressed','false');
       label('正在聆听…'); log('通话已接通');
     } catch (error) {
-      if (expectedSession === session) { hooks.error(error.message); await stop(); }
+      if (expectedSession === session) { hooks.error(hooks.formatError ? hooks.formatError(error) : error.message); await stop(); }
     } finally { if (expectedSession === session) starting = false; }
   }
   async function stop() {
@@ -194,10 +211,10 @@ export function createRealtimeCall(client, hooks) {
     if (capture) { capture.port.onmessage=null; capture.disconnect(); capture = null; }
     source?.disconnect(); source = null;
     const closing = context; context = null; player = null;
-    if (closing) await closing.close().catch(()=>{});
     mute.disabled = true; muted = false; panel.hidden = true;
     button.textContent = '通话'; button.setAttribute('aria-pressed','false'); hooks.active?.(false);
     log('通话已挂断');
+    if (closing) await closing.close().catch(()=>{});
     await cancelled;
   }
   button.addEventListener('click', () => { if (active || starting) void stop(); else void start(); });
@@ -205,7 +222,7 @@ export function createRealtimeCall(client, hooks) {
   mute.addEventListener('click', () => {
     muted = !muted;
     stream?.getAudioTracks().forEach(track=>{track.enabled = !muted;});
-    interrupt(); send({type:'reset'}); caption.textContent = '';
+    interrupt(); speechStarted = false; send({type:'reset'}); caption.textContent = '';
     label(muted ? '麦克风已静音' : '正在聆听…');
     mute.textContent = muted ? '取消静音' : '静音'; mute.setAttribute('aria-pressed',String(muted));
   });

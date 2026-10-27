@@ -260,3 +260,34 @@ async def test_semantic_candidate_loading_keeps_gateway_event_loop_responsive(db
         assert memories
     finally:
         await task
+
+
+async def test_ann_warm_cache_does_not_reload_full_projection_and_rechecks_hidden_source(db, seeded_scope, encoder, monkeypatch):
+    from agi_wind.memory import semantic
+    mid, eid = fact(db, seeded_scope, "我喜欢咖啡")
+    await semantic.index_semantic(db, seeded_scope)
+    assert mid in (await semantic.semantic_candidates(db, seeded_scope, "提神饮料"))[0]
+    original = semantic._load_candidate_vectors
+    calls = []
+    def bounded_load(*args, **kwargs):
+        calls.append(kwargs)
+        assert kwargs.get('memory_ids') is not None
+        assert kwargs.get('chunk_ids') is not None
+        return original(*args, **kwargs)
+    monkeypatch.setattr(semantic, '_load_candidate_vectors', bounded_load)
+    assert mid in (await semantic.semantic_candidates(db, seeded_scope, "提神饮料"))[0]
+    assert calls
+    with db.engine.begin() as conn:
+        conn.execute(m.events.update().where(m.events.c.id == eid).values(visibility='hidden'))
+    assert (await semantic.semantic_candidates(db, seeded_scope, "提神饮料"))[0] == {}
+
+
+async def test_ann_backend_failure_falls_back_to_keyword(db, seeded_scope, encoder, monkeypatch):
+    from agi_wind.memory import semantic
+    mid, _ = fact(db, seeded_scope, "我喜欢咖啡")
+    await semantic.index_semantic(db, seeded_scope)
+    def broken(*args, **kwargs):
+        raise RuntimeError('synthetic ANN failure')
+    monkeypatch.setattr(semantic, '_ann_candidates', broken)
+    assert any(hit.memory_id == mid for hit in await MemoryService(db).search(seeded_scope, '咖啡'))
+    assert semantic.semantic_status(db) == 'local_unavailable'

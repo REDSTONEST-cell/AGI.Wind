@@ -10,6 +10,8 @@ import json
 import math
 import struct
 import time
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import httpx
@@ -25,7 +27,8 @@ from ..archive.repository import digest, lock
 from ..identity.service import authorize
 
 DIMENSION = 512
-MAX_POOL = 10000
+_ANN_LOCK = threading.Lock()
+_ANN_PAGE = 512
 
 
 def active_clause(reference=None):
@@ -76,6 +79,12 @@ def indexable_sources_clause(scope):
         or_(and_(r.c.start_offset.is_(None),r.c.end_offset.is_(None)),
             and_(r.c.start_offset>=0,r.c.end_offset>r.c.start_offset,r.c.end_offset<=func.length(text))),
         or_(r.c.quote_hash.is_(None),r.c.quote_hash==func.encode(func.sha256(func.convert_to(quote,"UTF8")),"hex")))
+    if getattr(scope,'scene','owner_private')=='group':
+        valid=and_(valid,v.c.id==scope.conversation_id)
+    else:
+        owner=exists(select(m.external_principals.c.id).where(
+            m.external_principals.c.id==e.c.sender_principal_id,m.external_principals.c.is_owner.is_(True)))
+        valid=and_(valid,or_(v.c.channel_kind!='group',owner))
     source_rows = select(r.c.id).select_from(r.join(e,r.c.event_id==e.c.id).join(v,e.c.conversation_id==v.c.id)).where(r.c.memory_id==mm.memory_items.c.id)
     summary_blocked = exists(select(r.c.id).where(r.c.memory_id==mm.memory_items.c.id,
         r.c.event_id.in_(blocked_sources(scope))))
@@ -313,7 +322,7 @@ async def index_semantic(db, scope, limit=64):
         return {"indexed": 0, "status": "local_unavailable"}
 
 
-def _load_candidate_vectors(db, scope, fingerprint):
+def _load_candidate_vectors(db, scope, fingerprint, *, memory_ids=None, chunk_ids=None):
     """Own the connection in this worker thread, including all row verification.
 
     Neither synchronous PostgreSQL I/O nor processing up to 20k candidates may
@@ -327,18 +336,100 @@ def _load_candidate_vectors(db, scope, fingerprint):
         memory_rows = list(conn.execute(select(mm.memory_items, mm.memory_vectors.c.vector,
             mm.memory_vectors.c.content_hash.label("vector_hash"), mm.memory_vectors.c.revision.label("vector_revision"))
             .join(mm.memory_vectors, mm.memory_items.c.id == mm.memory_vectors.c.memory_id)
-            .where(item_scope(scope), active_clause(), indexable_sources_clause(scope), mm.memory_vectors.c.space_id == sid)
-            .order_by(mm.memory_items.c.is_pinned.desc(), mm.memory_items.c.created_at.desc(), mm.memory_items.c.id).limit(MAX_POOL)).mappings())
+            .where(item_scope(scope), active_clause(), indexable_sources_clause(scope), mm.memory_vectors.c.space_id == sid,
+                mm.memory_items.c.id.in_(memory_ids) if memory_ids is not None else True)
+            .order_by(mm.memory_items.c.id)).mappings())
         refs = verified_refs(conn, scope, memory_rows)
         memories = [(r["id"], r["vector"]) for r in memory_rows if r["id"] in refs
             and r["vector_revision"] == r["revision"] and r["vector_hash"] == memory_hash(r, refs[r["id"]])]
         chunk_rows = conn.execute(chunk_query(scope).add_columns(mm.chunk_vectors.c.vector,
             mm.chunk_vectors.c.content_hash.label("vector_hash"), mm.chunk_vectors.c.revision.label("vector_revision"))
             .join(mm.chunk_vectors, mm.retrieval_chunks.c.id == mm.chunk_vectors.c.chunk_id)
-            .where(mm.chunk_vectors.c.space_id == sid).order_by(m.events.c.recorded_at.desc(), mm.retrieval_chunks.c.id).limit(MAX_POOL)).mappings()
+            .where(mm.chunk_vectors.c.space_id == sid,
+                mm.retrieval_chunks.c.id.in_(chunk_ids) if chunk_ids is not None else True)
+            .order_by(mm.retrieval_chunks.c.id)).mappings()
         chunks = [(r["id"], r["vector"]) for r in chunk_rows if chunk_valid(r)
                   and r["vector_hash"] == r["content_hash"] and r["vector_revision"] == r["revision"]]
     return memories, chunks
+
+
+def _projection_metadata(db, scope, fingerprint):
+    """Read compact IDs/hashes, never vector blobs or private source text.
+
+    This remains O(n) metadata work. It detects new/removed/replaced projections
+    even when an indexing batch did not bump the companion's memory revision.
+    Expiry and pool/scene gates are evaluated anew on every request.
+    """
+    with db.engine.connect() as conn:
+        revision = authorize(conn, scope, scope.companion_id)['memory_revision']
+        sid = conn.scalar(select(mm.embedding_spaces.c.id).where(mm.embedding_spaces.c.fingerprint == fingerprint))
+        if not sid:
+            return None
+        a, v = mm.memory_items, mm.memory_vectors
+        memories = list(conn.execute(select(a.c.id, a.c.revision, v.c.revision, v.c.content_hash)
+            .join(v, a.c.id == v.c.memory_id).where(item_scope(scope), active_clause(),
+                indexable_sources_clause(scope), v.c.space_id == sid).order_by(a.c.id)))
+        c, v = mm.retrieval_chunks, mm.chunk_vectors
+        chunks = list(conn.execute(chunk_query(scope).with_only_columns(
+            c.c.id, c.c.revision, v.c.revision, v.c.content_hash)
+            .join(v, c.c.id == v.c.chunk_id).where(v.c.space_id == sid).order_by(c.c.id)))
+    signature = hashlib.sha256(repr((revision, memories, chunks)).encode()).digest()
+    return signature, [r[0] for r in memories], [r[0] for r in chunks]
+
+
+def _ann_candidates(db, scope, fingerprint, vector):
+    from .ann import VectorIndex
+    # Serialize native index construction/search and keep cache ownership on db.
+    # Four scenes bound resident graph count. The LRU never owns source text.
+    key = (scope.account_id, scope.companion_id, scope.user_id,
+           getattr(scope, 'scene', 'owner_private'), getattr(scope, 'room_id', None),
+           scope.conversation_id, fingerprint)
+    with _ANN_LOCK:
+        metadata = _projection_metadata(db, scope, fingerprint)
+        if metadata is None:
+            return None
+        signature, memory_ids, chunk_ids = metadata
+        cache = getattr(db, '_memory_ann_cache', None)
+        if cache is None:
+            cache = db._memory_ann_cache = OrderedDict()
+        cached = cache.get(key)
+        if cached is None or cached[0] != signature:
+            indexes = (VectorIndex(), VectorIndex())
+            # No MAX_POOL truncation: load and verify the entire eligible vector
+            # projection in bounded pages, adding each page into the native graph.
+            for start in range(0, max(len(memory_ids), len(chunk_ids)), _ANN_PAGE):
+                loaded = _load_candidate_vectors(db, scope, fingerprint,
+                    memory_ids=memory_ids[start:start+_ANN_PAGE],
+                    chunk_ids=chunk_ids[start:start+_ANN_PAGE])
+                if loaded is None:
+                    return None
+                for index, rows in zip(indexes, loaded):
+                    index.add(rows)
+            cache[key] = (signature, indexes)
+            while len(cache) > 4:
+                cache.popitem(last=False)
+        else:
+            indexes = cached[1]
+        cache.move_to_end(key)
+        # ANN is only candidate selection. Re-fetch current vectors and all original
+        # provenance/visibility/revision gates before computing the final cosine.
+        # Expand when rejected sources would otherwise starve lower-ranked facts.
+        count = 256
+        while True:
+            selected = [index.search(vector, count) for index in indexes]
+            loaded = _load_candidate_vectors(db, scope, fingerprint,
+                memory_ids=selected[0], chunk_ids=selected[1])
+            if loaded is None:
+                return None
+            ranks = tuple(rank_vectors(vector, rows) for rows in loaded)
+            if all(len(rank) >= 80 or count >= index.size
+                   for rank, index in zip(ranks, indexes)):
+                return ranks
+            # Low similarity is not source rejection and should not force a full
+            # graph scan. Expansion is solely to compensate failed verification.
+            if all(len(rows) == len(ids) for rows, ids in zip(loaded, selected)):
+                return ranks
+            count *= 2
 
 
 async def semantic_candidates(db, scope, query):
@@ -353,18 +444,13 @@ async def semantic_candidates(db, scope, query):
         vectors = await asyncio.wait_for(client.embed([query[:4096]], query=True), timeout=1.0)
         if len(vectors) != 1:
             raise ValueError("invalid query vector")
-        loaded = await asyncio.to_thread(_load_candidate_vectors, db, scope, client.space.fingerprint)
-        if loaded is None:
+        ranks = await asyncio.to_thread(_ann_candidates, db, scope, client.space.fingerprint, vectors[0])
+        if ranks is None:
             db._memory_semantic_state = "local_pending"
             return {}, {}
-        memories, chunks = loaded
-        if len(memories)+len(chunks) > 256:
-            ranks = await asyncio.to_thread(lambda: (rank_vectors(vectors[0], memories), rank_vectors(vectors[0], chunks)))
-        else:
-            ranks = rank_vectors(vectors[0], memories), rank_vectors(vectors[0], chunks)
         db._memory_semantic_state = "semantic_local"
         return dict(ranks[0]), dict(ranks[1])
-    except (httpx.HTTPError, OSError, ValueError, KeyError, TimeoutError):
+    except (httpx.HTTPError, OSError, ValueError, KeyError, TimeoutError, ImportError, RuntimeError):
         db._memory_semantic_state = "local_unavailable"
         db._memory_semantic_retry_at = time.monotonic()+10
         return {}, {}

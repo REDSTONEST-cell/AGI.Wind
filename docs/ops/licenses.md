@@ -9,3 +9,5 @@
 - Letta、GPT-SoVITS、BGE、SenseVoice、EverOS 本轮未装入本项目业务环境，锁版/权重/许可仍为后续任务。
 
 发布或分发头像/模型前须核对具体素材授权；当前不包含其发布验收。
+
+USearch 本地 HNSW Python 依赖采用 Apache-2.0，版本以 app/uv.lock 为准；本次仅调用公开接口。

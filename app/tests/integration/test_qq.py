@@ -12,15 +12,20 @@ async def test_qq_settings_auth_validation_masking_and_persistence(db,actor,seed
         assert (await c.get('/api/v1/integrations/qq')).status_code==401
         assert (await c.get('/api/v1/integrations/qq',headers=headers)).json()['enabled'] is False
         payload=dict(enabled=True,owner_qq='3548782171',bot_qq='334193096',
-                     conversation_id=str(seeded_scope.conversation_id),token='synthetic-qq-token-32-characters-long')
+                     conversation_id=str(seeded_scope.conversation_id),token='synthetic-qq-token-32-characters-long',
+                     debounce_quiet_seconds=2.4,reply_min_gap_seconds=2.0,debounce_enabled=False)
         response=await c.put('/api/v1/integrations/qq',headers=headers,json=payload)
         assert response.status_code==200
         assert response.json()['token_configured'] is True
+        assert response.json()['debounce_quiet_seconds']==2.4
+        assert response.json()['reply_min_gap_seconds']==2.0
         assert payload['token'] not in response.text
         assert payload['token'] not in (tmp_path/'settings.json').read_text()
         from agi_wind.core.settings import Settings,apply_persisted_settings
         restored=apply_persisted_settings(Settings(data_dir=tmp_path))
         assert restored.qq.owner_qq=='3548782171'
+        assert restored.qq.debounce_enabled is False
+        assert restored.qq.debounce_quiet_seconds==2.4
         assert restored.qq.conversation_id==seeded_scope.conversation_id
 
 
@@ -49,7 +54,7 @@ def test_qq_real_websocket_roundtrip_uses_archive_segments_and_deduplicates(db,a
     app.state.settings.memory_extraction_enabled=False
     app.state.settings.memory_maintenance_enabled=False
     app.state.settings.qq=QQSettings(enabled=True,owner_qq='3548782171',bot_qq='334193096',
-        conversation_id=seeded_scope.conversation_id,reply_delay_seconds=0)
+        conversation_id=seeded_scope.conversation_id,reply_delay_seconds=0,debounce_enabled=False)
     token='synthetic-qq-token-32-characters-long'
     app.state.settings_store.set(TOKEN_REF,token)
     DeletionLedger(tmp_path/'governance').initialize()

@@ -11,9 +11,13 @@ from io import BytesIO
 import ipaddress
 import json
 import logging
+import math
+import random
 import secrets
 import socket
 import time
+from anyio import CancelScope
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
@@ -31,6 +35,7 @@ from ..delivery.segments import split_reply
 from .qq_groups import (ensure_group_binding, ensure_principal, group_allowed, group_message,
                         receipt_exists, save_send_receipt)
 from .qq_attention import GroupAttention
+from .qq_debounce import QQDebouncer, config_from_policy
 
 logger = logging.getLogger('agi_wind.qq')
 TOKEN_REF = 'AGI_WIND_QQ_ONEBOT_TOKEN'
@@ -42,7 +47,22 @@ class QQSettings(DTO):
     owner_qq: str = Field(default='', pattern=r'^(?:[1-9][0-9]{4,19})?$')
     bot_qq: str = Field(default='', pattern=r'^(?:[1-9][0-9]{4,19})?$')
     conversation_id: UUID | None = None
-    reply_delay_seconds: float = Field(default=0.6, ge=0, le=3)
+    # Base pause before each outgoing bubble. The actual delay also uses a log
+    # curve on text length plus jitter; 0 disables pacing (tests use this).
+    reply_delay_seconds: float = Field(default=1.0, ge=0, le=3)
+    reply_min_gap_seconds: float = Field(default=1.8, ge=0, le=10)
+    reply_max_delay_seconds: float = Field(default=8.0, ge=2, le=20)
+    reply_max_segments: int = Field(default=8, ge=1, le=32)
+    # Private-message aggregation. Group aggregation stays disabled because
+    # per-sender batches would reorder a shared group scope.
+    debounce_enabled: bool = True
+    debounce_quiet_seconds: float = Field(default=2.2, ge=0.2, le=10)
+    debounce_max_wait_seconds: float = Field(default=8.0, ge=0.5, le=30)
+    debounce_final_grace_seconds: float = Field(default=0.9, ge=0.05, le=5)
+    debounce_continuation_seconds: float = Field(default=2.0, ge=0.2, le=10)
+    debounce_max_messages: int = Field(default=8, ge=1, le=20)
+    debounce_max_chars: int = Field(default=4000, ge=100, le=12000)
+    debounce_min_chars: int = Field(default=2, ge=1, le=200)
     # Group support is opt-in per group: only explicitly enabled groups are bridged.
     group_enabled: bool = False
     allowed_groups: list[str] = Field(default_factory=list, max_length=100)
@@ -72,6 +92,8 @@ class QQSettings(DTO):
             raise ValueError('group chat requires bot QQ')
         if self.owner_qq and self.owner_qq == self.bot_qq:
             raise ValueError('owner and bot must differ')
+        if self.debounce_quiet_seconds > self.debounce_max_wait_seconds:
+            raise ValueError('debounce quiet window cannot exceed max wait')
         return self
 
 
@@ -81,6 +103,11 @@ class QQUpdate(QQSettings):
 
 class QQGroupToggle(DTO):
     enabled: bool
+
+
+class QQOutboxFile(DTO):
+    """A file from the dedicated QQ outbox directory; never an arbitrary path."""
+    name: str = Field(min_length=1, max_length=200)
 
 
 def request_id_for(bot, message_id):
@@ -199,12 +226,22 @@ class QQBridge:
         self.stopping=False
         self.stop_lock=asyncio.Lock()
         self.connection_lock=asyncio.Lock()
-        self.attention=GroupAttention(settings.qq.followup_seconds,settings.qq.followup_max_rounds)
+        self.send_lock=asyncio.Lock()
+        self.send_version=0
+        self._last_send_at=0.0
+        self.debouncer=QQDebouncer(
+            self._enqueue_debounced_private,
+            config_provider=lambda: config_from_policy(self.settings.qq),
+        )
+        data_dir=getattr(settings,'data_dir',None)
+        self.attention=GroupAttention(settings.qq.followup_seconds,settings.qq.followup_max_rounds,
+            state_path=data_dir/'qq-attention.json' if data_dir is not None else None)
 
     def view(self):
         return {**self.settings.qq.model_dump(mode='json'),'token_configured':self.store.configured(TOKEN_REF),
                 'connected':bool(self.connection and self.connection.connected),'status':self.last_status,
-                'ws_path':WS_PATH,'groups_enabled':self.settings.qq.group_enabled,'queued':self.queue.qsize()}
+                'ws_path':WS_PATH,'groups_enabled':self.settings.qq.group_enabled,'queued':self.queue.qsize(),
+                'debouncing':self.debouncer.pending_count()}
 
     async def stop(self):
         async with self.stop_lock:
@@ -213,6 +250,11 @@ class QQBridge:
             finally: self.stopping=False
 
     async def _stop(self):
+        self.send_version+=1
+        idle=getattr(self.service,'idle_cognition',None)
+        if idle is not None:
+            idle.cancel_actor(self.actor,'stopped')
+        await self.debouncer.cancel_all("bridge_stopped")
         # Drain before the first await so the consumer cannot start the next job
         # while interrupt() waits for an upstream provider to finish cancelling.
         while not self.queue.empty(): self.queue.get_nowait(); self.queue.task_done()
@@ -239,7 +281,11 @@ class QQBridge:
         message=private_message(data,self.settings.qq)
         if message:
             if message['text'].strip().lower() in ('stop','/stop','停止','/停止'):
-                await self.stop()
+                stop_all=getattr(self.service,'stop_all',None)
+                if stop_all:
+                    await stop_all(self.actor)
+                else:
+                    await self.stop()
                 self.last_status='stopped'
                 return
             if self.stopping: return
@@ -247,6 +293,21 @@ class QQBridge:
             if rid in self.seen: return
             with self.service.db.engine.connect() as conn:
                 if conn.scalar(select(m.requests.c.id).where(m.requests.c.id==rid)): return
+            idle=getattr(self.service,'idle_cognition',None)
+            if idle is not None and self.settings.qq.conversation_id:
+                idle.cancel_conversation(self.settings.qq.conversation_id,'user_message')
+            if self._can_debounce(message):
+                key=f"private:{self.settings.qq.bot_qq}:{self.settings.qq.owner_qq}:{self.settings.qq.conversation_id}"
+                accepted=await self.debouncer.push(key,message)
+                if accepted:
+                    self.seen.append(rid)
+                    self.last_status='debouncing'
+                    return
+            else:
+                # A command/media message is a boundary: flush pending text
+                # fragments first so the user-visible order is not inverted.
+                key=f"private:{self.settings.qq.bot_qq}:{self.settings.qq.owner_qq}:{self.settings.qq.conversation_id}"
+                await self.debouncer.flush_key(key,'barrier')
             if self.queue.full():
                 self.last_status='queue_full'
                 return
@@ -259,21 +320,64 @@ class QQBridge:
         if not group_allowed(self.settings.qq,group['group_id']):
             self.last_status='group_ignored'
             return
+        if group.get('sender_qq')==self.settings.qq.owner_qq and str(group.get('text') or '').strip().lower() in ('stop','/stop','停止','/停止'):
+            stop_all=getattr(self.service,'stop_all',None)
+            if stop_all:
+                await stop_all(self.actor)
+            else:
+                await self.stop()
+            self.last_status='stopped'
+            return
         key=f"group:{group['bot_qq']}:{group['group_id']}:{group['platform_message_id']}"
         if key in self.seen: return
+        idle=getattr(self.service,'idle_cognition',None)
+        if idle is not None:
+            with self.service.db.engine.connect() as conn:
+                conversation_id=conn.scalar(select(m.channel_bindings.c.conversation_id).where(
+                    m.channel_bindings.c.account_id==self.actor.account_id,
+                    m.channel_bindings.c.companion_id==select(m.conversations.c.companion_id).where(
+                        m.conversations.c.id==self.settings.qq.conversation_id).scalar_subquery(),
+                    m.channel_bindings.c.platform=='qq', m.channel_bindings.c.channel_kind=='group',
+                    m.channel_bindings.c.bot_external_id==group['bot_qq'],
+                    m.channel_bindings.c.external_chat_id==group['group_id'],
+                    m.channel_bindings.c.enabled.is_(True)))
+            if conversation_id is not None:
+                idle.cancel_conversation(conversation_id,'user_message')
         if self.queue.full():
             self.last_status='queue_full'
             return
         self.seen.append(key)
         self.queue.put_nowait(group)
 
+    def _can_debounce(self, message):
+        """Only ordinary private text participates; media and commands stay immediate."""
+        policy=self.settings.qq
+        text=str(message.get('text') or '').strip()
+        return bool(policy.debounce_enabled and text and not text.startswith(('/','#','!','！'))
+                    and not message.get('images') and not message.get('image_files')
+                    and not message.get('records'))
+
+    async def _enqueue_debounced_private(self, batch, reason):
+        if self.stopping or not self.connection or not self.connection.connected:
+            return
+        payload={'kind':'private_batch','messages':list(batch.messages),'text':batch.text,
+                 'debounce_reason':reason}
+        # A bounded queue is fine here: waiting in the debounce task never holds
+        # the send lock or a generation worker, and stop() cancels this task.
+        await self.queue.put(payload)
+        self.last_status='ready'
+        logger.info('qq debounce flushed messages=%s chars=%s reason=%s',
+                    len(batch.messages),len(batch.text),reason)
+
     async def consume(self, connection):
         while connection.connected:
             message=await self.queue.get()
             try:
                 if self.stopping or not connection.connected: continue
-                self.job=asyncio.create_task(self.respond(connection,message))
-                await asyncio.gather(self.job,return_exceptions=True)
+                async with self.send_lock:
+                    if self.stopping or not connection.connected or connection is not self.connection: continue
+                    self.job=asyncio.create_task(self.respond(connection,message))
+                    await asyncio.gather(self.job,return_exceptions=True)
             finally:
                 self.job=None; self.generation_id=None; self.queue.task_done()
 
@@ -289,9 +393,17 @@ class QQBridge:
             with self.service.db.engine.connect() as conn:
                 conversation=authorized_conversation(conn,self.actor,policy.conversation_id)
                 if conversation['state']!='active': raise AppError('QQ_CONVERSATION','QQ绑定的对话已归档，请重新选择',409)
-            text,asset_ids=await self._prepare_input(connection,message)
-            request=ChatRequest(request_id=message['request_id'],conversation_id=policy.conversation_id,
-                input={'text':text,'asset_ids':asset_ids},output={'voice':self._voice_mode(message)},device_id='qq-onebot')
+            messages=message.get('messages') if isinstance(message.get('messages'),list) else [message]
+            prepared=[]
+            for item in messages:
+                prepared.append(await self._prepare_input(connection,item))
+            text='\n'.join(value for value,_ in prepared if value.strip())
+            asset_ids=list(dict.fromkeys(asset_id for _,values in prepared for asset_id in values))
+            voice_mode=('always' if any(item.get('records') for item in messages) or '语音' in text else 'auto')
+            request=ChatRequest(request_id=messages[0].get('request_id') or message['request_id'],
+                conversation_id=policy.conversation_id,
+                input={'text':text,'asset_ids':asset_ids},output={'voice':voice_mode},
+                device_id=f'qq-private:{policy.bot_qq}:{policy.owner_qq}')
             accepted=await self.service.submit(self.actor,request)
             self.generation_id=accepted.generation_id
             self.wakeup.set(); self.last_status='generating'
@@ -299,12 +411,17 @@ class QQBridge:
             if row['state']!='completed' or row['delivery_state']=='cancelled':
                 self.last_status='generation_stopped'; return
             parts=await self._reply_parts(await self._reply_content())
-            for index,part in enumerate(parts[:32]):
-                if index: await asyncio.sleep(self._typing_delay(part,policy.reply_delay_seconds))
-                if not self.settings.qq.enabled or connection is not self.connection: return
+            max_parts=max(1,min(32,int(policy.reply_max_segments)))
+            for index,part in enumerate(parts[:max_parts]):
+                await self._pause_before_send(part,policy,first=index==0)
+                current=self.settings.qq
+                if (not current.enabled or not connection.connected or connection is not self.connection
+                        or (current.bot_qq,current.owner_qq,current.conversation_id)!=(policy.bot_qq,policy.owner_qq,policy.conversation_id)): return
                 await connection.call('send_private_msg',{'user_id':int(policy.owner_qq),'message':[part]})
+                self._mark_sent()
             self.last_status='ready'
-            logger.info('qq reply delivered request=%s segments=%s',request.request_id,min(32,len(parts)))
+            logger.info('qq reply delivered request=%s messages=%s segments=%s',
+                        request.request_id,len(messages),min(max_parts,len(parts)))
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -321,7 +438,8 @@ class QQBridge:
         """Reply in one group room after the rule-first attention decision."""
         try:
             policy=self.settings.qq
-            if not policy.enabled or connection is not self.connection: return
+            if (not policy.enabled or connection is not self.connection
+                    or not group_allowed(policy,message['group_id']) or message['bot_qq']!=policy.bot_qq): return
             room_key=None
             with self.service.db.engine.connect() as conn:
                 private=authorized_conversation(conn,self.actor,policy.conversation_id)
@@ -352,13 +470,25 @@ class QQBridge:
             receipt=False
             if message.get('reply_to_platform_message_id'):
                 receipt=receipt_exists(self.service.db, binding['id'], message['reply_to_platform_message_id'])
-            decision=self.attention.decide({
+            # Only this room's recent events enter attention classification.
+            with self.service.db.engine.connect() as conn:
+                recent=list(conn.execute(select(m.events.c.sender_principal_id,m.events.c.role,m.events.c.content).where(
+                    m.events.c.account_id==self.actor.account_id,m.events.c.conversation_id==conversation_id,
+                    m.events.c.id!=event['id'],m.events.c.visibility=='visible',
+                    m.events.c.role.in_(('user','assistant'))).order_by(
+                        m.events.c.recorded_at.desc(),m.events.c.id.desc()).limit(6)).mappings())
+            context=[{'sender_principal_id':'bot' if row['role']=='assistant' else str(row['sender_principal_id'] or ''),
+                      'text':str((row['content'] or {}).get('text') or '')[:200]} for row in reversed(recent)]
+            self.attention.followup_seconds=policy.followup_seconds
+            self.attention.max_rounds=policy.followup_max_rounds
+            decision=await self.attention.decide_smart({
                 'room_key': room_key, 'sender_principal_id': str(principal['id']) if principal else None,
                 'is_self': False, 'anonymous': bool(message.get('anonymous')),
                 'bot_qq': message['bot_qq'], 'mentioned_qq_ids': message.get('mentioned_qq_ids') or [],
                 'reply_to_platform_message_id': message.get('reply_to_platform_message_id'),
                 'text': message['text'], 'platform_message_id': message['platform_message_id'],
-            }, receipt_exists=receipt, trigger_mode=policy.group_trigger_mode)
+            }, receipt_exists=receipt, trigger_mode=policy.group_trigger_mode,
+                provider=getattr(self.service,'provider',None),model=getattr(self.service,'model',None),context=context)
             if decision.action!='reply':
                 self.last_status='group_observed'
                 logger.info('qq group observed group=%s sender=%s reason=%s',message['group_id'],
@@ -366,18 +496,22 @@ class QQBridge:
                 try:
                     if getattr(self.service, 'memory_extraction_enabled', False):
                         from ..core.types import SceneScope
-                        from ..memory.jobs import enqueue_member_extraction
+                        from ..memory.jobs import enqueue_member_extraction, enqueue_extraction
                         with self.service.db.engine.begin() as db_conn:
-                            enqueue_member_extraction(db_conn, SceneScope(
+                            memory_scope=SceneScope(
                                 account_id=self.actor.account_id, user_id=self.actor.user_id,
                                 companion_id=companion_id, conversation_id=conversation_id,
-                                scene='group', room_id=binding['id']), observed=True)
+                                scene='group', room_id=binding['id'])
+                            if principal and principal['is_owner']:
+                                enqueue_extraction(db_conn,memory_scope,event['id'])
+                            elif principal:
+                                enqueue_member_extraction(db_conn,memory_scope,observed=True)
                 except Exception:
                     logger.debug('could not queue observed member memory extraction', exc_info=True)
                 return
             request_id=uuid5(NAMESPACE_URL, f"agi-wind:qq-group:{message['bot_qq']}:{message['group_id']}:{message['platform_message_id']}")
             accepted=self.service.archive.submit_external_reply(self.actor, conversation_id, event['id'], request_id,
-                output={'voice':self._voice_mode(message)}, device_id='qq-group')
+                output={'voice':self._voice_mode(message)}, device_id=f"qq-group:{message['bot_qq']}:{message['group_id']}")
             self.generation_id=accepted.generation_id
             self.wakeup.set(); self.last_status='generating'
             row=await self._await_generation()
@@ -385,10 +519,15 @@ class QQBridge:
                 self.last_status='generation_stopped'; return
             parts=await self._reply_parts(await self._reply_content())
             bot_message_ids=[]
-            for index,part in enumerate(parts[:32]):
-                if index: await asyncio.sleep(self._typing_delay(part,policy.reply_delay_seconds))
-                if not self.settings.qq.enabled or connection is not self.connection: return
+            max_parts=max(1,min(32,int(policy.reply_max_segments)))
+            for index,part in enumerate(parts[:max_parts]):
+                await self._pause_before_send(part,policy,first=index==0)
+                current=self.settings.qq
+                if (not current.enabled or not connection.connected or connection is not self.connection
+                        or not group_allowed(current,message['group_id']) or current.bot_qq!=message['bot_qq']
+                        or current.conversation_id!=policy.conversation_id): return
                 result=await connection.call('send_group_msg',{'group_id':int(message['group_id']),'message':[part]})
+                self._mark_sent()
                 platform_message_id=result.get('message_id') if isinstance(result,dict) else None
                 if platform_message_id is not None:
                     save_send_receipt(self.service.db, binding['id'], platform_message_id,
@@ -407,6 +546,81 @@ class QQBridge:
             if self.generation_id:
                 with suppress(Exception): await self.service.interrupt(self.actor,self.generation_id,uuid4())
 
+    def _proactive_binding(self, target):
+        """Resolve the current authorized room; targets never create new bindings."""
+        policy=self.settings.qq
+        connection=self.connection
+        if (not isinstance(target,dict) or not policy.enabled or self.stopping
+                or not connection or not connection.connected or target.get('bot')!=policy.bot_qq):
+            return None
+        kind=target.get('kind'); recipient=str(target.get('recipient') or '')
+        with self.service.db.engine.connect() as conn:
+            private=authorized_conversation(conn,self.actor,policy.conversation_id)
+            if private['state']!='active': return None
+            if kind=='private':
+                if recipient!=policy.owner_qq: return None
+                conversation_id=private['id']; binding=None
+            elif kind=='group':
+                if not group_allowed(policy,recipient): return None
+                binding=conn.execute(select(m.channel_bindings).where(
+                    m.channel_bindings.c.account_id==self.actor.account_id,
+                    m.channel_bindings.c.companion_id==private['companion_id'],
+                    m.channel_bindings.c.platform=='qq',m.channel_bindings.c.channel_kind=='group',
+                    m.channel_bindings.c.bot_external_id==policy.bot_qq,
+                    m.channel_bindings.c.external_chat_id==recipient,
+                    m.channel_bindings.c.enabled.is_(True))).mappings().first()
+                if binding is None: return None
+                conversation=authorized_conversation(conn,self.actor,binding['conversation_id'])
+                if conversation['state']!='active': return None
+                conversation_id=conversation['id']
+                if target.get('binding_id') and str(binding['id'])!=str(target['binding_id']): return None
+            else:
+                return None
+            if target.get('conversation_id') and str(conversation_id)!=str(target['conversation_id']): return None
+            return {'conversation_id':conversation_id,'binding_id':binding['id'] if binding else None}
+
+    def proactive_available(self, target):
+        try:
+            return self._proactive_binding(target) is not None
+        except Exception:
+            return False
+
+    async def deliver_proactive(self, target, content, result, check):
+        """Serialize bounded QQ segments and recheck cancellation and binding before each send."""
+        connection=self.connection; version=self.send_version; sent=0
+        async with self.send_lock:
+            binding=self._proactive_binding(target)
+            if not binding or connection is not self.connection or version!=self.send_version:
+                return {'sent':False,'reason':'qq_unavailable','segments':0}
+            if str(result.get('conversation_id') or '')!=str(binding['conversation_id']):
+                return {'sent':False,'reason':'qq_binding_changed','segments':0}
+            if await check() is False:
+                return {'sent':False,'reason':'qq_cancelled','segments':0}
+            parts=await self._reply_parts(content)
+            ids=[]
+            policy=self.settings.qq
+            max_parts=max(1,min(32,int(policy.reply_max_segments)))
+            for index,part in enumerate(parts[:max_parts]):
+                await self._pause_before_send(part,policy,first=index==0)
+                if await check() is False:
+                    return {'sent':False,'reason':'qq_cancelled','segments':sent}
+                current=self._proactive_binding(target)
+                if (current!=binding or connection is not self.connection or not connection.connected
+                        or version!=self.send_version):
+                    return {'sent':False,'reason':'qq_binding_changed','segments':sent}
+                kind=target['kind']
+                delivered=await connection.call('send_group_msg' if kind=='group' else 'send_private_msg',
+                    {'group_id' if kind=='group' else 'user_id':int(target['recipient']),'message':[part]})
+                self._mark_sent()
+                sent+=1
+                if kind=='group' and isinstance(delivered,dict) and delivered.get('message_id') is not None:
+                    save_send_receipt(self.service.db,binding['binding_id'],delivered['message_id'],
+                                      generation_id=result.get('generation_id'),segment_index=index)
+                    ids.append(str(delivered['message_id']))
+            if ids:
+                self.attention.mark_replied(str(binding['binding_id']),bot_message_ids=ids)
+        return {'sent':bool(sent),'reason':'ok' if sent else 'empty','segments':sent}
+
     async def _await_generation(self):
         async with asyncio.timeout(300):
             while True:
@@ -424,12 +638,36 @@ class QQBridge:
     def _voice_mode(message):
         return 'always' if message.get('records') or '语音' in message.get('text','') else 'auto'
 
-    @staticmethod
-    def _typing_delay(part, base):
-        """Human-ish pause before a message: longer text takes longer to "type"."""
-        if part.get('type')!='text': return base
-        length=len(str((part.get('data') or {}).get('text') or ''))
-        return min(8.0, base + length*0.06)
+    def _typing_delay(self, part, policy):
+        """Log-shaped human-ish pause before a bubble.
+
+        A fixed per-character delay makes long messages feel wrong; AstrBot's
+        proactive-chat plugin uses a log-shaped interval for the same reason.
+        Jitter avoids a metronomic cadence. ``reply_delay_seconds=0`` disables
+        pacing completely (used by deterministic tests).
+        """
+        base=float(policy.reply_delay_seconds)
+        if base<=0:
+            return 0.0
+        if part.get('type')=='text':
+            length=len(str((part.get('data') or {}).get('text') or ''))
+            delay=base+math.log1p(max(0,length))*1.05+random.uniform(0.15,0.55)
+        else:
+            delay=base+1.0+random.uniform(0.15,0.55)
+        return min(float(policy.reply_max_delay_seconds),max(0.0,delay))
+
+    async def _pause_before_send(self, part, policy, *, first=False):
+        delay=self._typing_delay(part,policy)
+        if delay<=0:
+            return
+        if first:
+            delay=min(delay,2.5)
+        gap=max(0.0,self._last_send_at+float(policy.reply_min_gap_seconds)-time.monotonic())
+        if max(delay,gap)>0:
+            await asyncio.sleep(max(delay,gap))
+
+    def _mark_sent(self):
+        self._last_send_at=time.monotonic()
 
     async def _prepare_input(self, connection, message):
         text=message.get('text','')
@@ -511,10 +749,43 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
     from ..core.settings import persist_settings,SETTINGS_WRITE_LOCK
     bridge=QQBridge(app,settings,store,service,assets,actor,wakeup)
     app.state.qq_bridge=bridge
+    service.qq_bridge=bridge
 
     @app.get('/api/v1/integrations/qq')
     async def status(current=Depends(authenticate)):
         return bridge.view()
+
+    @app.post('/api/v1/integrations/qq/outbox/send')
+    async def send_outbox_file(body: QQOutboxFile,current=Depends(authenticate)):
+        """Send one file from data/qq-outbox to the bound owner over QQ.
+
+        The path is a filename, not an arbitrary path: the endpoint can only
+        read from the dedicated outbox directory, so it cannot exfiltrate
+        settings, tokens or other project data.
+        """
+        policy=settings.qq
+        if not policy.enabled or not policy.owner_qq:
+            raise AppError('QQ_DISABLED','QQ 私聊未启用',409)
+        name=body.name
+        if name != Path(name).name or name in ('.','..') or '/' in name or '\\' in name:
+            raise AppError('QQ_OUTBOX_NAME','文件名无效',422)
+        root=(Path(settings.data_dir)/'qq-outbox').resolve()
+        path=(root/name).resolve()
+        if root not in path.parents or not path.is_file():
+            raise AppError('QQ_OUTBOX_MISSING','文件不在 QQ 发件箱中',404)
+        if path.stat().st_size>25*1024*1024:
+            raise AppError('QQ_OUTBOX_SIZE','文件超过 25MB',413)
+        connection=bridge.connection
+        if connection is None or not connection.connected:
+            raise AppError('QQ_OFFLINE','QQ 当前未连接',409)
+        result=await connection.call('upload_private_file',{
+            'user_id':int(policy.owner_qq),
+            'file':'file:///'+path.as_posix(),
+            'name':path.name,
+            'upload_file':True,
+        })
+        logger.info('qq outbox file sent bytes=%s',path.stat().st_size)
+        return {'sent':True,'name':path.name,'file_id':(result or {}).get('file_id')}
 
     @app.get('/api/v1/integrations/qq/groups')
     def groups(companion_id:UUID,current=Depends(authenticate)):
@@ -588,7 +859,8 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
                     settings.qq=previous
                     raise
         bridge.last_status='waiting' if policy.enabled else 'disabled'
-        bridge.attention=GroupAttention(policy.followup_seconds,policy.followup_max_rounds)
+        bridge.attention=GroupAttention(policy.followup_seconds,policy.followup_max_rounds,
+            state_path=settings.data_dir/'qq-attention.json')
         return bridge.view()
 
     @app.websocket(WS_PATH)
@@ -615,9 +887,12 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
                 else: await bridge.receive_message(data)
         except (WebSocketDisconnect,ValueError): pass
         finally:
-            connection.disconnect()
-            if bridge.connection is connection: await bridge.stop()
-            worker.cancel(); await asyncio.gather(worker,return_exceptions=True)
-            if bridge.connection is connection: bridge.connection=None
-            bridge.last_status='waiting' if settings.qq.enabled else 'disabled'
-            logger.info('qq onebot disconnected')
+            # ASGI cancels the connection scope on disconnect. Finish owned
+            # resource cleanup even when an await is hit inside that scope.
+            with CancelScope(shield=True):
+                connection.disconnect()
+                if bridge.connection is connection: await bridge.stop()
+                worker.cancel(); await asyncio.gather(worker,return_exceptions=True)
+                if bridge.connection is connection: bridge.connection=None
+                bridge.last_status='waiting' if settings.qq.enabled else 'disabled'
+                logger.info('qq onebot disconnected')

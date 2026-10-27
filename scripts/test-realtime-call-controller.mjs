@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, {afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 const core = await readFile(new URL('../app/src/agi_wind/api/client/call-audio.js',import.meta.url),'utf8');
@@ -8,11 +8,13 @@ code = code.replaceAll('import.meta.url', "'http://localhost:18440/client/realti
 const {createRealtimeCall} = await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 const tick = () => new Promise(resolve=>setImmediate(resolve));
 const defer = () => { let resolve; const promise=new Promise(r=>{resolve=r;}); return {promise,resolve}; };
+let cleanup;
+afterEach(async()=>{ await cleanup?.(); cleanup=null; });
 
-function environment({permission,accepting,closing,replyText='哥哥我听到你说话了，继续吧。'}={}) {
+function environment({permission,accepting,closing,streaming,replyText='哥哥我听到你说话了，继续吧。'}={}) {
   const elements = new Map();
   globalThis.document={querySelector(id){
-    if(!elements.has(id))elements.set(id,{textContent:'',hidden:true,disabled:false,setAttribute(){},addEventListener(){}});
+    if(!elements.has(id))elements.set(id,{textContent:'',hidden:true,disabled:false,setAttribute(){},addEventListener(type,handler){this[type]=handler;}});
     return elements.get(id);
   }};
   globalThis.window={addEventListener(){}};
@@ -20,7 +22,8 @@ function environment({permission,accepting,closing,replyText='哥哥我听到你
   globalThis.isSecureContext=true;
   const track={enabled:true,stopped:false,stop(){this.stopped=true;}};
   const media={getTracks:()=>[track],getAudioTracks:()=>[track]};
-  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:()=>permission?permission.promise:Promise.resolve(media)}}});
+  const constraints=[];
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:options=>{constraints.push(options);return permission?permission.promise:Promise.resolve(media);}}}});
   const sources=[];
   const contexts=[];
   globalThis.AudioContext=class {
@@ -30,7 +33,8 @@ function environment({permission,accepting,closing,replyText='哥哥我听到你
     createBuffer(){return {copyToChannel(){}};}
     createBufferSource(){const s={connect(){},disconnect(){},start(){},stop(){this.stopped=true;}};sources.push(s);return s;}
   };
-  globalThis.AudioWorkletNode=class {constructor(){this.port={};}connect(){}disconnect(){}};
+  const captures=[];
+  globalThis.AudioWorkletNode=class {constructor(){this.port={};captures.push(this);}connect(){}disconnect(){}};
   const sockets=[];
   globalThis.WebSocket=class {
     static OPEN=1;
@@ -46,11 +50,12 @@ function environment({permission,accepting,closing,replyText='哥哥我听到你
   const requests=[], turns=[], errors=[];
   const client={url:x=>x,async request(path,options){requests.push({path,options});return path.endsWith('status')?{available:true}:{ticket:'synthetic',call_id:'synthetic-call'};},
     chat(payload){requests.push({path:'chat',payload});return accepting?accepting.promise:Promise.resolve({generation_id:'synthetic',events_url:'/events'});},
-    async stream(path,{onEvent}){for(const [type,payload]of [['text.delta',{text:replyText}],['text.completed',{}],['generation.completed',{}]])onEvent({type,data:{payload}});},
+    async stream(path,options){if(streaming)return streaming(path,options);for(const [type,payload]of [['text.delta',{text:replyText}],['text.completed',{}],['generation.completed',{}]])options.onEvent({type,data:{payload}});},
   };
   const call=createRealtimeCall(client,{prepare:async()=> 'conversation',conversationId:()=> 'conversation',
     beginTurn(text){const view={text,update(value){this.reply=value;},finish(state){this.state=state;}};turns.push(view);return view;},error:x=>errors.push(x)});
-  return {call,track,media,sockets,sources,contexts,requests,turns,errors,elements};
+  cleanup=()=>call.stop();
+  return {call,track,media,sockets,sources,contexts,requests,turns,errors,elements,captures,constraints};
 }
 
 test('hangup during microphone permission wait releases a late microphone grant',async()=>{
@@ -108,4 +113,44 @@ test('long replies respect speech credits and barge-in discards pending chunks',
   ws.emit({type:'speech_start'});await tick();
   ws.emit({type:'speech_credit',epoch:1,credits:10});assert.equal(count(),26);
   assert.equal(env.call.active,true);await env.call.stop();
+});
+
+test('echo-cancelled microphone continues uploading while replying and playing',async()=>{
+  const holding=defer();const env=environment({streaming:()=>holding.promise});await env.call.start();const ws=env.sockets[0];
+  assert.equal(env.constraints[0].audio.echoCancellation,true);
+  ws.emit({type:'speech_start'});ws.emit({type:'final',text:'开始回答',utterance:1});await tick();
+  assert.equal(env.requests.find(item=>item.path==='chat').payload.device_id,'synthetic-call');
+  const packet=new ArrayBuffer(12);new DataView(packet).setUint32(0,1,true);ws.emit(packet);
+  const frame=new ArrayBuffer(2560);env.captures[0].port.onmessage({data:frame});
+  assert.ok(ws.sent.includes(frame));
+  await env.call.stop();holding.resolve();
+});
+
+test('speech start aborts the old SSE and final replaces it while late events stay silent',async()=>{
+  const listeners=[];const holding=defer();
+  const env=environment({streaming:(path,options)=>{listeners.push(options);return holding.promise;}});
+  await env.call.start();const ws=env.sockets[0];
+  ws.emit({type:'speech_start'});ws.emit({type:'final',text:'旧问题',utterance:1});await tick();
+  ws.emit({type:'speech_start'});
+  assert.equal(listeners[0].signal.aborted,true);assert.equal(env.turns[0].state,'cancelled');
+  ws.emit({type:'final',text:'插话的新问题',utterance:2});await tick();
+  assert.equal(env.turns.length,2);assert.equal(env.turns[1].text,'插话的新问题');
+  listeners[0].onEvent({type:'text.delta',data:{payload:{text:'迟到的旧回复。'}}});
+  assert.equal(env.turns[0].reply,undefined);
+  assert.equal(ws.sent.filter(x=>typeof x==='string'&&JSON.parse(x).type==='speak').length,0);
+  await env.call.stop();holding.resolve();
+});
+
+test('final without speech_start still interrupts playback and mute ignores late ASR/audio',async()=>{
+  const env=environment();await env.call.start();const ws=env.sockets[0];
+  ws.emit({type:'speech_start'});ws.emit({type:'final',text:'旧问题',utterance:1});await tick();
+  const packet=new ArrayBuffer(12);new DataView(packet).setUint32(0,1,true);ws.emit(packet);
+  ws.emit({type:'final',text:'新的问题',utterance:2});await tick();
+  assert.equal(env.sources[0].stopped,true);assert.equal(env.turns.length,2);
+  ws.emit({type:'final',text:'重复的问题',utterance:2});await tick();assert.equal(env.turns.length,2);
+  env.elements.get('#call-mute').click();assert.equal(env.track.enabled,false);
+  const sent=ws.sent.length;env.captures[0].port.onmessage({data:new ArrayBuffer(2560)});assert.equal(ws.sent.length,sent);
+  ws.emit({type:'speech_start'});ws.emit({type:'final',text:'静音后的迟到识别',utterance:3});ws.emit(packet);await tick();
+  assert.equal(env.turns.length,2);assert.equal(env.sources.length,1);
+  env.elements.get('#call-mute').click();assert.equal(env.track.enabled,true);
 });

@@ -1,4 +1,5 @@
 import httpx
+import json
 import pytest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ from test_client import client_app, connect
 
 class ProactiveProvider:
     def __init__(self, text="[情绪:温和]\n今天风有点大，你那边呢？"):
-        self.text = text
+        self.text = json.dumps({'action':'reach_out','message':text})
         self.calls = []
 
     async def stream(self, model, messages):

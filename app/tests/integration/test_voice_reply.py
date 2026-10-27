@@ -157,6 +157,20 @@ async def test_auto_probability_one_queues(db, actor, seeded_scope, chat_request
     assert db.count("speech_segments") == 1
 
 
+async def test_explicit_voice_request_forces_voice_with_zero_auto_probability(db, actor, seeded_scope, chat_request_factory, tmp_path):
+    provider = VoiceProvider()
+    service, voice, _ = build_service(
+        db, tmp_path, provider, FakeEngine(), probability=0.0, random_value=lambda: 0.5
+    )
+    request = chat_request_factory(text="发一条语音来听听", conversation_id=seeded_scope.conversation_id)
+    request.output.voice = "auto"
+    generation_id = await run_turn(service, voice, actor, request)
+    assert any(event.type == "speech.queued" for event in service.replay(actor, generation_id))
+    assert db.count("speech_segments") == 1
+    content = db.all("events", role="assistant")[0]["content"]
+    assert content["voice"]["mode"] == "always"
+
+
 async def test_tts_failure_keeps_text_and_marks_voice_failed(db, actor, seeded_scope, chat_request_factory, tmp_path):
     provider = VoiceProvider()
     service, voice, _ = build_service(db, tmp_path, provider, FakeEngine(fail="TTS_FAILED"))
@@ -261,8 +275,8 @@ async def test_agent_tool_reply_keeps_hidden_emotion_and_playable_voice(db, acto
     assert len(engine.calls) == 1 and "带笑意" in engine.calls[0][2]
 
 
-async def test_each_sentence_gets_its_own_voice_segment_in_order(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    provider = VoiceProvider(reply="今天好开心呀。我也很高兴。")
+async def test_each_model_line_gets_its_own_voice_segment_in_order(db, actor, seeded_scope, chat_request_factory, tmp_path):
+    provider = VoiceProvider(reply="今天好开心呀。\n我也很高兴。")
     engine = FakeEngine()
     service, voice, _ = build_service(db, tmp_path, provider, engine)
     request = chat_request_factory(text="我今天升职了", conversation_id=seeded_scope.conversation_id)
@@ -273,7 +287,7 @@ async def test_each_sentence_gets_its_own_voice_segment_in_order(db, actor, seed
     assert [row["segment_index"] for row in rows] == [0, 1]
     assert [call[0] for call in engine.calls] == ["今天好开心呀。", "我也很高兴。"]
     content = db.all("events", role="assistant")[0]["content"]
-    assert content["text"] == "今天好开心呀。我也很高兴。"
+    assert content["text"] == "今天好开心呀。\n我也很高兴。"
     assert content["segments"] == [
         {"index": 0, "kind": "voice", "text": "今天好开心呀", "segment_id": str(rows[0]["id"])},
         {"index": 1, "kind": "voice", "text": "我也很高兴", "segment_id": str(rows[1]["id"])},
@@ -292,7 +306,7 @@ async def test_each_sentence_gets_its_own_voice_segment_in_order(db, actor, seed
 
 
 async def test_auto_voice_is_decided_once_per_turn(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    provider = VoiceProvider(reply="今天好开心呀。我也很高兴。")
+    provider = VoiceProvider(reply="今天好开心呀。\n我也很高兴。")
     engine = FakeEngine()
     service, voice, _ = build_service(
         db, tmp_path, provider, engine, probability=0.5, random_value=lambda: 0.0
@@ -309,7 +323,7 @@ async def test_auto_voice_is_decided_once_per_turn(db, actor, seeded_scope, chat
 
 
 async def test_voice_turn_can_switch_to_text_after_two_voice_segments(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    provider = VoiceProvider(reply="第一句呀。第二句呀。第三句呀。第四句呀。")
+    provider = VoiceProvider(reply="第一句呀。\n第二句呀。\n第三句呀。\n第四句呀。")
     engine = FakeEngine()
     values = iter([0.0, 0.0, 0.0])
     service, voice, _ = build_service(

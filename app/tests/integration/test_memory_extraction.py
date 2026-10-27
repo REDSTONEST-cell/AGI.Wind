@@ -46,6 +46,12 @@ def _events(db, role=None):
 
 
 def _memory_job(db, worker, worker_id="extractor"):
+    # Handler/writer tests deliberately advance past the automatic idle deadline;
+    # the real scheduling contract is covered separately by test_memory_schedule.
+    from agi_wind.archive import models as m
+    with db.engine.begin() as conn:
+        conn.execute(m.outbox.update().where(m.outbox.c.event_type == 'memory.extract',
+            m.outbox.c.state == 'pending').values(available_at=m.now()-timedelta(seconds=1)))
     jobs = worker.claim(worker_id, batch_size=4)
     job = next((item for item in jobs if item["event_type"] == "memory.extract"), None)
     assert job is not None
@@ -222,10 +228,12 @@ async def test_correction_replaces_structured_current_fact(db, actor, seeded_sco
     assert all(hit.memory_id != old_memory["id"] for hit in structured)
 
 
-async def test_gateway_worker_runs_extraction_after_real_chat_loop(db, actor, seeded_scope, tmp_path):
+async def test_gateway_worker_runs_extraction_after_real_chat_loop(db, actor, seeded_scope, tmp_path, monkeypatch):
     """End-to-end through create_app's outbox loop: chat -> archive -> extract -> memory."""
     from agi_wind.api.app import create_app
     from agi_wind.delivery.service import GenerationService
+    # This test covers the real worker, not a two-minute wall-clock wait.
+    monkeypatch.setattr('agi_wind.memory.jobs.AUTO_EXTRACT_IDLE_SECONDS', 0)
 
     class DynamicExtractor:
         async def extract(self, scope, events):

@@ -76,11 +76,11 @@ class AgentRunner:
             round_no = round_index + 1
             await self.check_current()
             final = round_index == self.settings.max_rounds or used >= self.settings.max_tool_calls
+            step += 1  # One actual model request; native reasoning is part of it.
             self.on_step({'round': round_no, 'step': step, 'kind': 'round', 'final': final})
             turn = await provider.tool_turn(model, messages, definitions, tool_choice='none' if final else 'auto')
             await self.check_current()
             if turn.reasoning:
-                step += 1
                 self.on_step({'round': round_no, 'step': step, 'kind': 'reasoning'})
                 await self.on_reasoning(turn.reasoning)
             if not turn.tool_calls:

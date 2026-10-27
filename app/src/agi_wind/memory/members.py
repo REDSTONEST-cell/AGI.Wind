@@ -11,7 +11,7 @@ from uuid import uuid4
 from sqlalchemy import and_, or_, select
 
 from . import models as mm
-from .extraction import _semantic_text
+from .extraction import _semantic_text, _semantic_predicate, _predicate_aliases
 from .lifecycle import extend_after_access, lifecycle_values, now_utc
 from ..archive import models as m
 from ..core.errors import AppError
@@ -97,6 +97,7 @@ class MemberMemoryWriter:
             principal_id = next(iter(principals))
             epistemic = "fictional" if fictional else candidate.epistemic_type
             predicate, value = map(_semantic_text, (candidate.predicate, candidate.value))
+            predicate = _semantic_predicate(predicate)
             semantic = bool(predicate and value)
             scoped = [mm.memory_items.c.account_id == scope.account_id,
                       mm.memory_items.c.companion_id == scope.companion_id,
@@ -107,7 +108,7 @@ class MemberMemoryWriter:
             exact = and_(mm.memory_items.c.content == candidate.content,
                          mm.memory_items.c.kind == candidate.kind,
                          mm.memory_items.c.epistemic_type == epistemic)
-            same_value = and_(mm.memory_items.c.predicate == predicate,
+            same_value = and_(mm.memory_items.c.predicate.in_(_predicate_aliases(predicate)),
                               mm.memory_items.c.value == value,
                               mm.memory_items.c.epistemic_type == epistemic)
             match = or_(exact, same_value) if semantic else exact
@@ -147,7 +148,7 @@ class MemberMemoryWriter:
                 if semantic:
                     occupied = list(conn.execute(select(mm.memory_items).where(
                         *scoped, active,
-                        mm.memory_items.c.predicate == predicate,
+                        mm.memory_items.c.predicate.in_(_predicate_aliases(predicate)),
                         mm.memory_items.c.value != "", mm.memory_items.c.value != value,
                         mm.memory_items.c.epistemic_type == "user_asserted")).mappings())
                 status = "disputed" if occupied else "active"

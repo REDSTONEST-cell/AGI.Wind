@@ -80,10 +80,19 @@ class ProactiveSettings(DTO):
     # After each completed reply the companion may think privately for a bounded number
     # of rounds, then decide whether to speak again. Effective only when enabled=True.
     after_reply_enabled: bool = True
+    after_reply_qq_enabled: bool = True
+    after_reply_tools_enabled: bool = True
+    after_reply_media_enabled: bool = True
+    after_reply_max_tool_calls: int = Field(default=2, ge=0, le=3)
     after_reply_delay_seconds: int = Field(default=150, ge=30, le=3600)
     after_reply_max_rounds: int = Field(default=2, ge=1, le=3)
     after_reply_max_steps: int = Field(default=4, ge=1, le=8)
     after_reply_max_runs_per_day: int = Field(default=6, ge=1, le=20)
+    continuation_enabled: bool = True
+    continuation_max_rounds: int = Field(default=6, ge=1, le=12)
+    continuation_max_messages: int = Field(default=3, ge=1, le=5)
+    continuation_max_wait_seconds: int = Field(default=900, ge=10, le=3600)
+    continuation_lifetime_minutes: int = Field(default=30, ge=1, le=120)
 
     @field_validator("quiet_start", "quiet_end")
     @classmethod

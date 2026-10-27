@@ -57,6 +57,12 @@ def install_agent_routes(app, settings, store, service, authenticate):
 
     @app.post('/api/v1/agent/stop')
     async def stop_actions(current=Depends(authenticate)):
+        idle = getattr(service, 'idle_cognition', None)
+        idle_stopped = idle.cancel_actor(current) if idle is not None else 0
+        proactive=getattr(app.state,'proactive',None)
+        proactive_stopped=proactive.cancel_actor(current) if proactive is not None else 0
+        stop_calls=getattr(app.state,'stop_calls',None)
+        call_stopped=await stop_calls(current) if stop_calls else 0
         qq_bridge=getattr(app.state,'qq_bridge',None)
         if qq_bridge: await qq_bridge.stop()
         from ..archive import models as m
@@ -71,8 +77,13 @@ def install_agent_routes(app, settings, store, service, authenticate):
                     or_(m.generations.c.state.in_(['pending','running','draining']), d.speech_segments.c.state.in_(['queued','synthesizing']))).distinct()))
         for generation_id in ids:
             await service.interrupt(current, generation_id, uuid4())
+        if idle is not None:
+            idle_stopped += idle.cancel_actor(current)
         approvals.revoke(current)
-        return {'stopped': len(ids)}
+        return {'stopped': len(ids) + idle_stopped + proactive_stopped + call_stopped,
+                'idle_stopped': idle_stopped,'proactive_stopped':proactive_stopped,'call_stopped':call_stopped}
+
+    service.stop_all = stop_actions
 
     def view():
         policy = settings.agent

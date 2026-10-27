@@ -1,4 +1,9 @@
+from types import SimpleNamespace
+from uuid import uuid4
+
+from agi_wind.core.types import ChatInput, PersonaSnapshot
 from agi_wind.delivery.segments import ReplySegmenter, split_reply
+from agi_wind.delivery.service import SEGMENTATION_OVERRIDE, GenerationService
 
 
 def texts(value):
@@ -31,3 +36,60 @@ def test_streaming_segmenter_flushes_unfinished_line():
     segmenter = ReplySegmenter()
     assert segmenter.feed('还没说完') == []
     assert segmenter.flush() == ['还没说完']
+
+
+def test_prompt_puts_dynamic_segmentation_rule_after_persona():
+    context = SimpleNamespace(
+        persona_snapshot=PersonaSnapshot(
+            companion_id=uuid4(),
+            version=1,
+            core={"name": "测试角色"},
+            style={},
+            relationship={},
+            commitments=[],
+        ),
+        memories=[],
+        recent_events=[],
+        current_input=ChatInput(text="在吗"),
+    )
+    system = GenerationService(None, None).messages(context, None, None, include_sticker=False)[0]["content"]
+    assert system.endswith(SEGMENTATION_OVERRIDE)
+    assert "不要每轮都固定三条" in system
+    assert system.rindex("【分段规则") > system.index('"persona"')
+
+
+def test_prompt_tells_model_voice_is_automatic_when_enabled():
+    context = SimpleNamespace(
+        persona_snapshot=PersonaSnapshot(
+            companion_id=uuid4(),
+            version=1,
+            core={"name": "测试角色"},
+            style={},
+            relationship={},
+            commitments=[],
+        ),
+        memories=[],
+        recent_events=[],
+        current_input=ChatInput(text="发一条语音来听听"),
+    )
+    system = GenerationService(None, None, voice=SimpleNamespace(enabled=True)).messages(
+        context, None, None, include_sticker=False
+    )[0]["content"]
+    assert "【语音消息】" in system
+    assert "不要说自己不能发语音" in system
+    assert system.index("【语音消息】") > system.index('"persona"')
+    assert system.endswith(SEGMENTATION_OVERRIDE)
+
+
+def test_voice_request_detection_is_narrow():
+    assert GenerationService.voice_requested("发一条语音来听听")
+    assert GenerationService.voice_requested("发语音的")
+    assert GenerationService.voice_requested("我要听语音的")
+    assert GenerationService.voice_requested("用语音说")
+    assert GenerationService.voice_requested("唱一下")
+    assert GenerationService.voice_requested("唱吧")
+    assert GenerationService.voice_requested("想听你的声音")
+    assert not GenerationService.voice_requested("语音设置在哪里")
+    assert not GenerationService.voice_requested("不用发语音")
+    assert not GenerationService.voice_requested("今天天气不错")
+

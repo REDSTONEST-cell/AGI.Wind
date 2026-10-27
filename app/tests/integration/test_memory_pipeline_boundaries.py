@@ -17,6 +17,8 @@ async def test_character_limited_batch_leaves_a_durable_continuation(db, seeded_
     with db.engine.begin() as conn:
         for _ in range(8): add_event(conn,seeded_scope,'合'*4000)
         enqueue_extraction(conn,seeded_scope,uuid4())
+        # Exercise extraction immediately without waiting for the automatic idle window.
+        conn.execute(m.outbox.update().where(m.outbox.c.event_type=='memory.extract').values(available_at=m.now()))
     class Empty:
         async def extract(self,scope,events): return [],{'calls':1}
     worker=Worker(db)
@@ -39,6 +41,7 @@ async def test_other_user_sources_are_not_offered_or_accepted(db, seeded_scope):
         foreign=add_event(conn,scope,'合成他人私有来源',conv)
         own=add_event(conn,scope,'合成当前用户来源')
         enqueue_extraction(conn,scope,uuid4())
+        conn.execute(m.outbox.update().where(m.outbox.c.event_type=='memory.extract').values(available_at=m.now()))
     class Capture:
         offered=[]
         async def extract(self,scope,events):

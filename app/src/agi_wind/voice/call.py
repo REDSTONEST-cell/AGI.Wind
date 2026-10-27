@@ -8,7 +8,10 @@ import math
 import secrets
 import struct
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
+from contextlib import suppress
+from anyio import CancelScope
+from sqlalchemy import select
 from fastapi import Depends, WebSocket, WebSocketDisconnect
 import httpx
 from pydantic import Field
@@ -46,6 +49,54 @@ class CallStart(DTO):
 def install_call_routes(app, settings, db, voice, authenticate):
     tickets = CallTickets()
     active = {}
+    service = getattr(app.state, 'service', None)
+
+    async def cancel_generations(session):
+        ids = set(session['generations'])
+        session['generations'].clear()
+        if service is None or not ids:
+            return
+        from ..archive import models as m
+        with db.engine.connect() as conn:
+            pending = list(conn.scalars(select(m.generations.c.id).where(
+                m.generations.c.id.in_(ids), m.generations.c.state.in_(('pending','running','draining')))))
+        for generation_id in pending:
+            await service.interrupt(session['actor'], generation_id, uuid4())
+
+    async def submit_call_chat(current, body):
+        key = (current.account_id, current.user_id)
+        session = active.get(key)
+        if session is None:
+            raise AppError('CALL_NOT_ACTIVE', '通话未连接或已挂断，请重新连接', 409)
+        async with session['lock']:
+            if (active.get(key) is not session or session['closed'] or not session['ready']
+                    or body.device_id != session['id'] or body.conversation_id != session['conversation_id']):
+                raise AppError('CALL_NOT_ACTIVE', '通话身份或窗口已失效，请重新连接', 409)
+            # A new utterance replaces only this call's unfinished generation.
+            await cancel_generations(session)
+            output = body.output.model_copy(update={'voice': 'off'})
+            accepted = await service.submit(current, body.model_copy(update={'output': output}))
+            session['generations'].add(accepted.generation_id)
+            return accepted
+
+    async def stop_calls(current):
+        session = active.get((current.account_id, current.user_id))
+        if session is None:
+            return 0
+        async with session['lock']:
+            session['closed'] = True
+            active.pop((current.account_id, current.user_id), None)
+            await cancel_generations(session)
+            with suppress(Exception):
+                await session['socket'].close(code=1000)
+        return 1
+
+    app.state.submit_call_chat = submit_call_chat
+    app.state.stop_calls = stop_calls
+    service_call_active = lambda conversation_id: any(
+        row['conversation_id'] == conversation_id and not row['closed'] for row in active.values())
+    if service is not None:
+        service.call_active = service_call_active
     async def asr_health():
         asr = {'available':False}
         try:
@@ -66,7 +117,8 @@ def install_call_routes(app, settings, db, voice, authenticate):
     async def ticket(body: CallStart, current=Depends(authenticate)):
         with db.engine.connect() as conn:
             authorized_conversation(conn, current, body.conversation_id)
-        return {'ticket':tickets.issue((current, body.conversation_id)), 'expires_in':30}
+        call_id = 'call-' + secrets.token_urlsafe(24)
+        return {'ticket':tickets.issue((current, body.conversation_id, call_id)), 'call_id':call_id, 'expires_in':30}
     @app.websocket('/api/v1/call/stream')
     async def call(ws: WebSocket):
         # Ticket is sent in the first frame, never a URL/query string or durable storage.
@@ -79,6 +131,7 @@ def install_call_routes(app, settings, db, voice, authenticate):
         owner_key = None
         speech_task = None
         relay_task = None
+        session = None
         epoch = 0
         speak_queue = asyncio.Queue(maxsize=16)
         send_lock = asyncio.Lock()
@@ -132,6 +185,8 @@ def install_call_routes(app, settings, db, voice, authenticate):
                     await send({'type':'error', 'code':'CALL_TTS_FAILED', 'message':'语音合成失败，文字回复保留'})
                 finally:
                     speak_queue.task_done()
+                    if version == epoch:
+                        await send({'type':'speech_credit', 'epoch':version, 'credits':1})
         async def cancel_speech(version):
             nonlocal speech_task, epoch
             epoch = version
@@ -149,18 +204,24 @@ def install_call_routes(app, settings, db, voice, authenticate):
             if owner is None:
                 await ws.close(code=1008)
                 return
-            current, conversation_id = owner
+            current, conversation_id, call_id = owner
             owner_key = (current.account_id, current.user_id)
             if owner_key in active:
                 await send({'type':'error', 'code':'CALL_BUSY', 'message':'已有通话，请先挂断'})
                 await ws.close(code=1008)
                 return
-            active[owner_key] = ws
+            session = {'actor':current, 'conversation_id':conversation_id, 'id':call_id,
+                       'socket':ws, 'lock':asyncio.Lock(), 'generations':set(), 'closed':False, 'ready':False}
+            active[owner_key] = session
+            if service is not None and service.idle_cognition is not None:
+                service.idle_cognition.cancel_conversation(conversation_id,'call_started')
             token = (settings.data_dir / 'asr-token.txt').read_text(encoding='utf-8').strip()
             from websockets.asyncio.client import connect
             async with connect(ASR_WS, additional_headers={'Authorization':'Bearer '+token}, open_timeout=3, max_size=65536, max_queue=8, proxy=None) as upstream:
                 # websockets 15 uses the explicit proxy=None to keep localhost direct.
-                await send({**json.loads(await upstream.recv()), 'speech_credits':16})
+                ready = json.loads(await upstream.recv())
+                session['ready'] = ready.get('type') == 'ready'
+                await send({**ready, 'speech_credits':16, 'call_id':call_id})
                 async def relay():
                     async for message in upstream:
                         await send(json.loads(message))
@@ -191,6 +252,8 @@ def install_call_routes(app, settings, db, voice, authenticate):
                             if type(version) is not int or not epoch <= version < 2**32:
                                 raise ValueError('invalid epoch')
                             await cancel_speech(version)
+                            async with session['lock']:
+                                await cancel_generations(session)
                         elif kind == 'speak':
                             if not voice.enabled:
                                 raise ValueError('voice disabled')
@@ -200,6 +263,8 @@ def install_call_routes(app, settings, db, voice, authenticate):
                             spoken = clean_for_speech(text, 240).text
                             if spoken:
                                 speak_queue.put_nowait((epoch, spoken, control.get('emotion')))
+                            else:
+                                await send({'type':'speech_credit', 'epoch':epoch, 'credits':1})
                         elif kind in ('reset', 'ping'):
                             await upstream.send(json.dumps({'type':kind}))
                         else:
@@ -214,9 +279,14 @@ def install_call_routes(app, settings, db, voice, authenticate):
             except Exception:
                 pass
         finally:
-            if owner_key is not None and active.get(owner_key) is ws:
-                active.pop(owner_key, None)
-            for task in (speech_task, relay_task):
-                if task:
-                    task.cancel()
-            await asyncio.gather(*(task for task in (speech_task, relay_task) if task), return_exceptions=True)
+            with CancelScope(shield=True):
+                if session is not None:
+                    async with session['lock']:
+                        session['closed'] = True
+                        if active.get(owner_key) is session:
+                            active.pop(owner_key, None)
+                        await cancel_generations(session)
+                for task in (speech_task, relay_task):
+                    if task:
+                        task.cancel()
+                await asyncio.gather(*(task for task in (speech_task, relay_task) if task), return_exceptions=True)

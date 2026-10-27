@@ -84,14 +84,15 @@ async def test_after_reply_cognition_waits_then_reaches_out(db, actor, seeded_sc
     assert processed == 1
     run = db.all("idle_cognition_runs")[0]
     assert run["state"] == "sent" and run["decision"] == "reach_out"
-    assert run["rounds_used"] == 1 and run["steps_used"] == 2
+    assert run["rounds_used"] == 1 and run["steps_used"] == 1
     assert run["message_event_id"]
-    assert len(run["steps"]) == 2 and run["steps"][0]["round"] == 1
+    assert run['steps'] == [{'round':1,'step':1,'kind':'model'}]
     messages = [row["content"] for row in db.all("events", role="assistant") if row["content"].get("proactive")]
     assert messages and messages[0]["text"] == "你还在吗？我刚想到一件事。"
     assert db.count("proactive_messages") == 1
     live = {row["type"] for row in db.all("conversation_live_events")}
-    assert {"idle_cognition.started", "idle_cognition.step", "idle_cognition.completed", "proactive.message"} <= live
+    assert {"idle_cognition.started", "idle_cognition.completed", "proactive.message"} <= live
+    assert 'idle_cognition.step' not in live  # complete-only fixture has no native reasoning
 
 
 async def test_silent_decision_does_not_send_a_message(db, actor, seeded_scope, chat_request_factory):
@@ -152,8 +153,8 @@ async def test_continue_uses_a_second_round_and_respects_step_budget(db, actor, 
     await idle.tick()
     run = db.all("idle_cognition_runs")[0]
     assert provider.complete_calls == 2
-    assert run["state"] == "sent" and run["rounds_used"] == 2 and run["steps_used"] == 3
-    assert [step["step"] for step in run["steps"]] == [1, 2, 3]
+    assert run["state"] == "sent" and run["rounds_used"] == 2 and run["steps_used"] == 2
+    assert [step["step"] for step in run["steps"]] == [1, 1]
     assert any(row["content"].get("proactive") for row in db.all("events", role="assistant"))
 
 

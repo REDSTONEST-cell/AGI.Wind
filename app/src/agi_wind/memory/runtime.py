@@ -12,7 +12,7 @@ from .jobs import MEMBER_EXTRACT, MEMORY_EXTRACT, run_extraction, run_member_ext
 from .lifecycle import maintain
 from ..archive import models as m
 from ..core.settings import apply_persisted_settings
-from ..core.types import Scope
+from ..core.types import Scope, SceneScope
 from ..jobs.worker import Worker
 
 logger = logging.getLogger('agi_wind.memory.worker')
@@ -40,6 +40,15 @@ def _scopes(db, actor):
             .order_by(m.conversations.c.created_at.desc())).mappings()
         seen, scopes = set(), []
         for row in rows:
+            if row['channel_kind'] == 'group':
+                binding = conn.execute(select(m.channel_bindings).where(
+                    m.channel_bindings.c.conversation_id == row['id'],
+                    m.channel_bindings.c.account_id == actor.account_id,
+                    m.channel_bindings.c.enabled.is_(True))).mappings().first()
+                if binding:
+                    scopes.append(SceneScope(**actor.model_dump(), companion_id=row['companion_id'],
+                        conversation_id=row['id'], scene='group', room_id=binding['id']))
+                continue
             if row['companion_id'] not in seen:
                 scopes.append(Scope(**actor.model_dump(), companion_id=row['companion_id'], conversation_id=row['id']))
                 seen.add(row['companion_id'])
@@ -65,6 +74,8 @@ async def background_tick(db, settings, actor, state):
         reference = datetime.now(SUMMARY_ZONE)
         with db.engine.begin() as conn:
             for scope in scopes:
+                if getattr(scope,'scene','owner_private') != 'owner_private':
+                    continue  # Owner summaries never consume a group's member pool.
                 enqueue_consolidation(conn,scope,'daily',reference - timedelta(days=1))
                 enqueue_consolidation(conn,scope,'weekly',reference - timedelta(days=reference.weekday()+1))
         state['summary'] = clock

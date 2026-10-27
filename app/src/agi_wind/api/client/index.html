@@ -18,7 +18,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/client/styles.css?v=20261027group-layout1">
+  <link rel="stylesheet" href="/client/styles.css?v=20261027mic1">
 </head>
 <body>
   <!-- 线性图标集：统一 24px 网格、1.75 描边 -->
@@ -135,7 +135,7 @@
               </div>
             </div>
             <div class="page-actions">
-              <button class="icon-button ghost log-toggle" id="log-toggle" type="button" aria-expanded="false" title="系统日志" aria-label="打开系统日志">
+              <button class="icon-button ghost log-toggle" id="log-toggle" type="button" aria-expanded="false" title="活动日志" aria-label="打开活动日志">
                 <svg><use href="#i-terminal"/></svg><span class="log-badge" id="log-badge" hidden>0</span>
               </button>
               <div class="menu-wrap">
@@ -178,6 +178,9 @@
                   <svg><use href="#i-image"/></svg>
                   <input id="chat-images" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple aria-label="选择聊天图片">
                 </label>
+                <button id="dictation-toggle" class="composer-add" type="button" aria-label="语音输入" aria-pressed="false" title="语音输入：点击录音，再点结束">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg>
+                </button>
                 <textarea id="input" rows="1" maxlength="48000" placeholder="说点什么…" aria-label="消息内容"></textarea>
                 <div class="composer-actions">
                   <button id="call-toggle" class="voice-switch" type="button" aria-pressed="false" title="实时语音通话">通话</button>
@@ -189,6 +192,16 @@
                 </div>
               </div>
             </form>
+            <div id="dictation-status" class="dictation-status" role="status" aria-live="polite" hidden></div>
+            <details class="microphone-options" id="microphone-options">
+              <summary>麦克风设置</summary>
+              <div class="microphone-controls">
+                <label for="microphone-device">输入设备</label>
+                <select id="microphone-device" aria-label="麦克风设备"><option value="">系统默认麦克风</option></select>
+                <button id="microphone-refresh" class="btn ghost small" type="button">检测麦克风</button>
+              </div>
+              <p id="microphone-status">语音输入和通话共用所选设备；没有声音时请选择实体麦克风。</p>
+            </details>
             <p class="composer-hint">Enter 发送 · Shift + Enter 换行 · 可直接粘贴图片 · 输入“停止”可中断回复</p>
           </div>
         </section>
@@ -582,14 +595,14 @@
 
           <form class="card" id="proactive-settings-form">
             <div class="card-head">
-              <div><h2>主动消息</h2><p class="meta">空闲一段时间后，她可以主动发来一条消息。默认关闭；空闲、间隔、每日上限与安静时段都由服务端执行。</p></div>
+              <div><h2>定时唤醒与主动消息</h2><p class="meta">空闲后定时醒来，由她决定是否找你，也可以保持安静。定时唤醒只面向你的私聊；QQ 同步到绑定的主人。</p></div>
               <span class="chip" id="proactive-state">读取中…</span>
             </div>
             <div class="tts-grid">
-              <label class="setting-row span-2"><span><strong>启用主动消息</strong><small>长时间空闲或回复后独处思考满足条件时才会发送</small></span><input id="proactive-enabled" class="switch" type="checkbox"></label>
-              <label class="field"><span>空闲多久后（分钟）</span><input id="proactive-idle" class="input" type="number" min="5" max="1440"></label>
-              <label class="field"><span>两条之间至少间隔（分钟）</span><input id="proactive-gap" class="input" type="number" min="5" max="1440"></label>
-              <label class="field"><span>每天最多</span><input id="proactive-max" class="input" type="number" min="1" max="20"></label>
+              <label class="setting-row span-2"><span><strong>启用定时唤醒</strong><small>唤醒不等于发送；她自行判断，安静也会进入冷却，不反复调用模型</small></span><input id="proactive-enabled" class="switch" type="checkbox"></label>
+              <label class="field"><span>私聊空闲多久后唤醒（分钟）</span><input id="proactive-idle" class="input" type="number" min="5" max="1440"></label>
+              <label class="field"><span>唤醒及消息最小间隔（分钟）</span><input id="proactive-gap" class="input" type="number" min="5" max="1440"></label>
+              <label class="field"><span>每天最多定时唤醒 / 主动消息</span><input id="proactive-max" class="input" type="number" min="1" max="20"></label>
               <div class="field-pair">
                 <label class="field"><span>安静开始</span><input id="proactive-quiet-start" class="input" type="time"></label>
                 <label class="field"><span>安静结束</span><input id="proactive-quiet-end" class="input" type="time"></label>
@@ -598,15 +611,24 @@
             <div class="tts-grid">
               <label class="setting-row span-2"><span><strong>回复后独处思考</strong><small>回复完约 2–3 分钟没等到你，她会先自己想一想，再决定是否主动来找你</small></span><input id="proactive-after-enabled" class="switch" type="checkbox"></label>
               <label class="field"><span>无回复后（秒）</span><input id="proactive-after-delay" class="input" type="number" min="30" max="3600"></label>
-              <label class="field"><span>最多思考轮数</span><input id="proactive-after-rounds" class="input" type="number" min="1" max="3"></label>
-              <label class="field"><span>每轮最多步骤</span><input id="proactive-after-steps" class="input" type="number" min="1" max="8"></label>
+              <label class="field"><span>群聊及非连续追话的模型轮数</span><input id="proactive-after-rounds" class="input" type="number" min="1" max="3"></label>
+              <label class="field"><span>每轮操作上限（模型＋工具）</span><input id="proactive-after-steps" class="input" type="number" min="1" max="8"></label>
               <label class="field"><span>每天最多思考次数</span><input id="proactive-after-runs" class="input" type="number" min="1" max="20"></label>
+              <label class="setting-row"><span><strong>主动消息同步到 QQ</strong><small>网页主动消息同步到绑定的主人私聊；群追话只发原群</small></span><input id="proactive-after-qq" class="switch" type="checkbox"></label>
+              <label class="setting-row"><span><strong>独处时查询工具</strong><small>记忆、表情包和联网；同时受 Agent 开关控制</small></span><input id="proactive-after-tools" class="switch" type="checkbox"></label>
+              <label class="setting-row"><span><strong>追话语音与表情包</strong><small>使用本地语音及本轮选中的表情</small></span><input id="proactive-after-media" class="switch" type="checkbox"></label>
+              <label class="field"><span>每个任务最多工具调用</span><input id="proactive-after-tool-calls" class="input" type="number" min="0" max="3"></label>
+              <label class="setting-row span-2"><span><strong>连续自主任务</strong><small>主人私聊中可先说话、使用只读工具、等待后继续；新消息或 Stop 优先。群聊沿用原追话。</small></span><input id="proactive-continuation" class="switch" type="checkbox"></label>
+              <label class="field"><span>每个任务最多模型调用</span><input id="proactive-task-rounds" class="input" type="number" min="1" max="12"></label>
+              <label class="field"><span>每个任务最多发信次数</span><input id="proactive-task-messages" class="input" type="number" min="1" max="5"></label>
+              <label class="field"><span>单次最多等待（秒）</span><input id="proactive-task-wait" class="input" type="number" min="10" max="3600"></label>
+              <label class="field"><span>任务最长持续（分钟）</span><input id="proactive-task-lifetime" class="input" type="number" min="1" max="120"></label>
             </div>
             <p class="meta" id="proactive-cognition-meta"></p>
             <p class="meta" id="proactive-meta"></p>
             <div class="form-actions">
               <p class="meta" id="proactive-hint" role="status" aria-live="polite"></p>
-              <button class="btn ghost" id="proactive-test" type="button">现在发一条</button>
+              <button class="btn ghost" id="proactive-test" type="button">现在唤醒一次</button>
               <button class="btn primary" type="submit">保存设置</button>
             </div>
           </form>
@@ -864,7 +886,20 @@
               <label class="field"><span>反向 WebSocket 地址</span><input class="input" id="qq-ws-address" readonly aria-label="QQ反向WebSocket地址"><small>接入端与服务在同一电脑时，可使用 ws://127.0.0.1:18440/api/v1/integrations/qq/ws；选择 OneBot v11、Universal、消息格式 array。</small></label>
               <label class="field"><span>连接令牌</span><input class="input" id="qq-token" type="password" minlength="32" maxlength="200" autocomplete="new-password" placeholder="至少32位；留空保留已保存的令牌"><small id="qq-key-status"></small></label>
               <div class="row"><button class="btn ghost small" id="qq-generate-token" type="button">生成新令牌</button><span class="meta">生成后复制到接入端的 Access Token</span></div>
-              <label class="setting-row"><span><strong>分段间隔</strong><small>单位：秒；图片独立发送</small></span><input class="input" id="qq-delay" type="number" min="0" max="3" step="0.1" value="0.6" required></label>
+              <div class="menu-sep" role="separator"></div>
+              <p class="meta"><strong>发送节奏</strong>：分段越慢越像真人；0 秒关闭等待（仅用于调试）。</p>
+              <div class="grid-2">
+                <label class="field"><span>每段基础等待（秒）</span><input class="input" id="qq-delay" type="number" min="0" max="3" step="0.1" value="1" required></label>
+                <label class="field"><span>两条消息最少间隔（秒）</span><input class="input" id="qq-min-gap" type="number" min="0" max="10" step="0.1" value="1.8"></label>
+                <label class="field"><span>单段最长等待（秒）</span><input class="input" id="qq-max-delay" type="number" min="2" max="20" step="0.5" value="8"></label>
+                <label class="field"><span>一次最多分几段</span><input class="input" id="qq-max-segments" type="number" min="1" max="32" step="1" value="8"></label>
+              </div>
+              <label class="setting-row"><span><strong>消息防抖</strong><small>你连续发好几条时先等你说完，再合并成一次思考；只对私聊纯文字生效</small></span><input class="switch" id="qq-debounce-enabled" type="checkbox"></label>
+              <div class="grid-2">
+                <label class="field"><span>说完后等待（秒）</span><input class="input" id="qq-debounce-quiet" type="number" min="0.5" max="10" step="0.1" value="2.2"></label>
+                <label class="field"><span>最多等到（秒）</span><input class="input" id="qq-debounce-max-wait" type="number" min="2" max="30" step="0.5" value="8"></label>
+                <label class="field"><span>最终确认等待（秒）</span><input class="input" id="qq-debounce-final-grace" type="number" min="0.2" max="5" step="0.1" value="0.9"></label>
+              </div>
               <p class="meta" id="qq-conversation"></p>
               <div class="menu-sep" role="separator"></div>
               <label class="setting-row"><span><strong>启用 QQ 群聊</strong><small>只接入下面明确填写的群；群成员不会获得主人权限</small></span><input class="switch" id="qq-group-enabled" type="checkbox"></label>
@@ -954,14 +989,14 @@
     </div>
 
     <div class="log-scrim" id="log-scrim" hidden></div>
-    <aside class="log-drawer" id="log-drawer" aria-label="系统日志" aria-hidden="true">
+    <aside class="log-drawer" id="log-drawer" aria-label="活动日志" aria-hidden="true">
       <div id="log-resize" class="log-resize" role="separator" aria-label="调整日志栏宽度" aria-orientation="vertical" tabindex="0" title="拖动调整宽度，双击恢复默认"></div>
       <header class="log-head">
         <div class="log-head-main">
           <div class="log-avatar avatar" id="log-avatar" aria-hidden="true">W</div>
           <div class="log-title">
-            <h2>系统日志</h2>
-            <p class="meta" id="log-status">实时 · 自动跟随</p>
+            <h2 id="log-title">她的活动</h2>
+            <p class="meta" id="log-status">看得懂的版本 · 自动跟随</p>
           </div>
         </div>
         <button class="icon-button ghost" id="log-close" type="button" title="关闭日志" aria-label="关闭日志"><svg><use href="#i-close"/></svg></button>
@@ -984,6 +1019,7 @@
         <input class="input term-search" id="log-search" placeholder="搜索日志、事件 ID、错误码" aria-label="搜索日志">
         <span class="meta" id="log-search-count"></span>
         <div class="term-actions">
+          <button class="term-action" id="log-mode" type="button" title="在简单说明和原始日志之间切换">看原始日志</button>
           <button class="term-action active" id="term-detail" type="button" title="显示结构化字段">详细</button>
           <button class="term-action" id="term-copy" type="button" title="复制当前筛选日志">复制</button>
           <button class="term-action active" id="term-follow" type="button" title="自动滚动到最新一行">跟随</button>
@@ -1045,6 +1081,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="/client/app.js?v=20261027cognition3"></script>
+  <script type="module" src="/client/app.js?v=20261027mic1"></script>
 </body>
 </html>

@@ -46,11 +46,13 @@ def conversation_pool_clause(scope, conversation=m.conversations):
 def owner_authored_clause(events=m.events):
     """Owner-pool extraction only trusts the owner's own messages.
 
-    Legacy rows have no sender principal and are treated as owner-authored; any QQ
-    group member or anonymous sender must not become owner-pool evidence.
+    Legacy private rows may lack a principal. Missing group identity is never
+    evidence that the speaker is the owner (also excludes unaddressed bot replies).
     """
     principal = m.external_principals
-    return or_(events.c.sender_principal_id.is_(None), exists(select(principal.c.id).where(
+    private=exists(select(m.conversations.c.id).where(m.conversations.c.id==events.c.conversation_id,
+        m.conversations.c.channel_kind!='group').correlate(events))
+    return or_(and_(events.c.sender_principal_id.is_(None),private), exists(select(principal.c.id).where(
         principal.c.id == events.c.sender_principal_id, principal.c.is_owner.is_(True))))
 
 
@@ -62,7 +64,7 @@ def ref_visible_in_scene(scope, row):
         return True
     # The owner's own group statement may be quoted in a private window; a member's
     # statement may not, even when the owner is the account holder.
-    return row.get("sender_principal_id") is None or bool(row.get("sender_is_owner"))
+    return bool(row.get("sender_is_owner"))
 
 
 def speaker_label(row, principal=None):

@@ -4,7 +4,7 @@ export function createQQPage(client, getConversation, openWindow = null) {
   let policy = null;
   let groups = [];
   const labels = {disabled:'未启用',waiting:'等待 QQ 接入端连接',ready:'已连接 · 可以私聊和群聊',
-    generating:'正在回复',stopped:'已停止',failed:'操作失败，请检查系统日志',
+    generating:'正在回复',debouncing:'正在等你把话说完',stopped:'已停止',failed:'操作失败，请检查系统日志',
     queue_full:'消息较多，请稍候',generation_stopped:'回答已停止',
     group_observed:'群消息已归档 · 未触发回复',group_ignored:'该群未启用接入',
     group_duplicate:'重复上报已忽略'};
@@ -25,6 +25,13 @@ export function createQQPage(client, getConversation, openWindow = null) {
     $('#qq-owner').value = value.owner_qq || '';
     $('#qq-bot').value = value.bot_qq || '';
     $('#qq-delay').value = value.reply_delay_seconds;
+    $('#qq-min-gap').value = value.reply_min_gap_seconds ?? 1.8;
+    $('#qq-max-delay').value = value.reply_max_delay_seconds ?? 8;
+    $('#qq-max-segments').value = value.reply_max_segments ?? 8;
+    $('#qq-debounce-enabled').checked = value.debounce_enabled !== false;
+    $('#qq-debounce-quiet').value = value.debounce_quiet_seconds ?? 2.2;
+    $('#qq-debounce-max-wait').value = value.debounce_max_wait_seconds ?? 8;
+    $('#qq-debounce-final-grace').value = value.debounce_final_grace_seconds ?? 0.9;
     $('#qq-group-enabled').checked = Boolean(value.group_enabled);
     $('#qq-allowed-groups').value = (value.allowed_groups || []).join(', ');
     $('#qq-group-trigger').value = value.group_trigger_mode || 'smart';
@@ -120,6 +127,13 @@ export function createQQPage(client, getConversation, openWindow = null) {
     try {
       const body = {enabled:$('#qq-enabled').checked, owner_qq:$('#qq-owner').value.trim(),
         bot_qq:$('#qq-bot').value.trim(), reply_delay_seconds:Number($('#qq-delay').value),
+        reply_min_gap_seconds:Number($('#qq-min-gap').value),
+        reply_max_delay_seconds:Number($('#qq-max-delay').value),
+        reply_max_segments:Number($('#qq-max-segments').value),
+        debounce_enabled:$('#qq-debounce-enabled').checked,
+        debounce_quiet_seconds:Number($('#qq-debounce-quiet').value),
+        debounce_max_wait_seconds:Number($('#qq-debounce-max-wait').value),
+        debounce_final_grace_seconds:Number($('#qq-debounce-final-grace').value),
         group_enabled:$('#qq-group-enabled').checked,
         allowed_groups:groupIds($('#qq-allowed-groups').value),
         group_trigger_mode:$('#qq-group-trigger').value,

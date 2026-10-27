@@ -132,18 +132,27 @@ class ArchiveService:
                 result = conn.execute(m.events.insert().values(account_id=conversation["account_id"], companion_id=conversation["companion_id"], conversation_id=conversation["id"], request_id=request["id"], generation_id=generation_id, role="assistant", kind="assistant_output", content=content, content_sha256=digest(content)).returning(m.events)).mappings().one()
         return dict(result)
 
-    def create_proactive_message(self, actor, conversation_id, text, model_ref=None, runtime="proactive", trigger="schedule"):
+    def create_proactive_message(self, actor, conversation_id, text, model_ref=None, runtime="proactive", trigger="schedule", precondition=None, media=None, device_id='proactive'):
         """Archive an unsolicited assistant message without inventing a user turn."""
         text = str(text or "").strip()
         if not text:
             raise AppError("EMPTY_PROACTIVE_MESSAGE", "主动消息为空", 422)
         request_id, generation_id, event_id = uuid4(), uuid4(), uuid4()
         content = {"text": text, "state": "complete", "proactive": True, "trigger": trigger}
+        if media:
+            content.update({key: media[key] for key in ('attachments', 'segments') if key in media})
         with self.db.engine.begin() as conn:
             conversation = authorized_conversation(conn, actor, conversation_id)
             lock(conn, conversation["companion_id"])
             if conversation.get("state", "active") != "active":
                 raise AppError("CONVERSATION_NOT_ACTIVE", "这段对话已归档，不能主动发消息", 409)
+            if precondition is not None:
+                precondition(conn, conversation)
+            for item in content.get('attachments', []):
+                asset = conn.execute(select(m.assets).join(m.asset_owners).where(
+                    m.assets.c.id == UUID(item['asset_id']), m.asset_owners.c.account_id == actor.account_id)).mappings().first()
+                if not asset or asset['kind'] != ('audio' if item['kind'] == 'audio' else 'image'):
+                    raise AppError('ASSET_UNAVAILABLE', '追话附件不可用', 403)
             companion = conn.execute(select(m.companions).where(m.companions.c.id == conversation["companion_id"])).mappings().one()
             conn.execute(
                 m.requests.insert().values(
@@ -153,7 +162,7 @@ class ArchiveService:
                     input_hash=digest({"proactive_event_id": str(event_id)}),
                     input={"text": ""},
                     output={},
-                    device_id="proactive",
+                    device_id=device_id,
                     generation_id=generation_id,
                     state="accepted",
                 )
@@ -185,6 +194,11 @@ class ArchiveService:
                 )
             )
             from ..delivery.stream import emit_live
+            from ..delivery.models import proactive_messages
+            conn.execute(proactive_messages.insert().values(id=uuid4(),account_id=actor.account_id,
+                companion_id=companion['id'],conversation_id=conversation_id,event_id=event_id,trigger=trigger))
+            for item in content.get('attachments', []):
+                conn.execute(m.asset_refs.insert().values(asset_id=UUID(item['asset_id']), event_id=event_id, purpose='output'))
             emit_live(
                 conn,
                 conversation_id,
@@ -193,6 +207,7 @@ class ArchiveService:
                     "event_id": str(event_id),
                     "conversation_id": str(conversation_id),
                     "text": text,
+                    "content": content,
                     "recorded_at": datetime.now(timezone.utc).isoformat(),
                     "trigger": trigger,
                 },

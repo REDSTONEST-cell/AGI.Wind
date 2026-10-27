@@ -21,8 +21,26 @@ class OpenAICompatibleProvider:
         async for chunk in self.stream(model, messages, realtime=True):
             yield chunk
 
-    async def stream(self, model, messages, *, realtime=False):
+    def _cognition_options(self, body):
+        endpoint = urlsplit(self.config.base_url)
+        if (endpoint.scheme == 'https' and endpoint.hostname == 'api.deepseek.com'
+                and endpoint.port in (None,443) and body['model'] in ('deepseek-flash','deepseek-v4-pro')):
+            # Autonomous work uses native reasoning, with a bounded low-effort
+            # budget. These provider-owned options do not alter dialogue settings.
+            body['thinking'] = {'type':'enabled'}
+            body['reasoning_effort'] = 'low'
+            key = 'max_completion_tokens' if 'max_completion_tokens' in body else 'max_tokens'
+            body[key] = min(4096, int(body.get(key,4096)))
+        return body
+
+    async def stream_cognition(self, model, messages):
+        async for chunk in self.stream(model, messages, cognition=True):
+            yield chunk
+
+    async def stream(self, model, messages, *, realtime=False, cognition=False):
         body = self.payload(model, messages, True)
+        if cognition:
+            self._cognition_options(body)
         endpoint = urlsplit(self.config.base_url)
         if (realtime and endpoint.scheme == 'https' and endpoint.hostname == 'api.deepseek.com'
                 and endpoint.port in (None, 443) and model.model_id in ('deepseek-flash','deepseek-v4-pro')):
@@ -95,12 +113,17 @@ class OpenAICompatibleProvider:
         except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
             raise AppError('PROVIDER_UNAVAILABLE', '记忆模型请求或响应不可用', 503) from None
 
-    async def tool_turn(self, model, messages, tools, tool_choice='auto'):
+    async def cognition_turn(self, model, messages, tools, tool_choice='auto'):
+        return await self.tool_turn(model,messages,tools,tool_choice,cognition=True)
+
+    async def tool_turn(self, model, messages, tools, tool_choice='auto', *, cognition=False):
         """Native function calling, using one bounded non-stream response per round.
 
         Keep the legacy streaming path unchanged. No beta URL/strict-mode assumptions.
         """
         body = self.payload(model, messages, False)
+        if cognition:
+            self._cognition_options(body)
         if tools:
             body.update(tools=tools, tool_choice=tool_choice)
         try:

@@ -13,6 +13,9 @@ def test_claim_filter_and_automatic_job_coalescing(db, seeded_scope):
         assert enqueue_extraction(conn,seeded_scope,uuid4()) is None
         conn.execute(m.outbox.insert().values(event_type='generation.requested',aggregate_id=uuid4(),payload={},dedupe_key='synthetic-generation'))
     worker = Worker(db)
+    assert worker.claim('memory',event_types=['memory.extract']) == []
+    with db.engine.begin() as conn:
+        conn.execute(m.outbox.update().where(m.outbox.c.event_type=='memory.extract').values(available_at=m.now()))
     memory = worker.claim('memory',event_types=['memory.extract'])
     chat = worker.claim('gateway',event_types=['generation.requested'])
     assert len(memory) == len(chat) == 1
@@ -25,6 +28,7 @@ async def test_exhausted_budget_defers_without_burning_retry_attempts(db, seeded
     from agi_wind.memory.jobs import enqueue_extraction
     with db.engine.begin() as conn:
         enqueue_extraction(conn,seeded_scope,uuid4())
+        conn.execute(m.outbox.update().where(m.outbox.c.event_type=='memory.extract').values(available_at=m.now()))
     worker = Worker(db)
     job = worker.claim('memory',event_types=['memory.extract'])[0]
     async def handler(item):

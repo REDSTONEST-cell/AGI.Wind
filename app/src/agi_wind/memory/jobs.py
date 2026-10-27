@@ -27,13 +27,40 @@ PIPELINE_VERSION = 1
 MAX_EVENT_CHARS = 4000
 MAX_BATCH_CHARS = 16000
 logger = logging.getLogger("agi_wind.memory")
+AUTO_EXTRACT_TURNS = 8
+AUTO_EXTRACT_IDLE_SECONDS = 120
+
+
+def _coalesce_automatic(conn, event_type, aggregate_id, generation_id, delay_seconds):
+    """Sliding idle deadline; eight distinct arrivals make the same job due now.
+
+    Scheduling metadata is durable in outbox, so restart does not lose the
+    accumulated turns. Manual/continuation jobs and retry/budget holds keep
+    their deadline. The pending-state CAS avoids touching a claimed job.
+    """
+    row = conn.execute(select(m.outbox).where(m.outbox.c.event_type == event_type,
+        m.outbox.c.aggregate_id == aggregate_id, m.outbox.c.state == 'pending').limit(1)).mappings().first()
+    if row is None:
+        return False
+    payload = dict(row['payload'] or {})
+    if payload.get('manual') or payload.get('continuation') or payload.get('last_error_code'):
+        return True
+    turns = list(payload.get('automatic_turn_ids') or [str(payload.get('generation_id') or row['id'])])
+    marker = str(generation_id or uuid4())
+    if marker in turns or len(turns) >= AUTO_EXTRACT_TURNS:
+        return True
+    turns.append(marker)
+    delay = 0 if len(turns) >= AUTO_EXTRACT_TURNS else max(0, delay_seconds)
+    updated = conn.execute(m.outbox.update().where(m.outbox.c.id == row['id'],
+        m.outbox.c.state == 'pending').values(payload={**payload, 'automatic_turn_ids': turns},
+        available_at=m.now()+timedelta(seconds=delay)))
+    return bool(updated.rowcount)
 
 
 def enqueue_extraction(conn, scope, generation_id):
-    """Register one idempotent extraction job for a completed generation."""
+    """Coalesce completed turns until eight arrivals or 120 seconds of idle."""
     lock(conn, scope.companion_id)
-    if conn.scalar(select(m.outbox.c.id).where(m.outbox.c.event_type == MEMORY_EXTRACT,
-        m.outbox.c.aggregate_id == scope.companion_id, m.outbox.c.state == 'pending').limit(1)):
+    if _coalesce_automatic(conn, MEMORY_EXTRACT, scope.companion_id, generation_id, AUTO_EXTRACT_IDLE_SECONDS):
         return None
     return conn.execute(
         insert(m.outbox)
@@ -47,8 +74,10 @@ def enqueue_extraction(conn, scope, generation_id):
                 "conversation_id": str(scope.conversation_id),
                 "generation_id": str(generation_id),
                 "pipeline_version": PIPELINE_VERSION,
+                "automatic_turn_ids": [str(generation_id)],
             },
             dedupe_key=f"memory-extract:{scope.companion_id}:{generation_id}",
+            available_at=m.now()+timedelta(seconds=AUTO_EXTRACT_IDLE_SECONDS),
         )
         .on_conflict_do_nothing()
         .returning(m.outbox.c.id)
@@ -76,23 +105,19 @@ def enqueue_manual_extraction(conn, scope):
     ).scalar()
 
 
-def enqueue_member_extraction(conn, scope, generation_id=None, observed=False, delay_seconds=60):
+def enqueue_member_extraction(conn, scope, generation_id=None, observed=False, delay_seconds=AUTO_EXTRACT_IDLE_SECONDS):
     """Queue member-pool extraction for one group room.
 
-    Observed-only messages use a delayed, coalesced job so a quiet group does not pay a
-    model call per message. One pending job per room is enough; later messages are
-    consumed by that job's cursor and the continuation queue.
+    Both replies and observed messages use a sliding idle deadline, or eight
+    arrivals, per room. One pending job retains all members' source messages.
     """
     room_id = getattr(scope, "room_id", None)
     if room_id is None:
         return None
     lock(conn, scope.companion_id)
-    if conn.scalar(select(m.outbox.c.id).where(
-            m.outbox.c.event_type == MEMBER_EXTRACT,
-            m.outbox.c.aggregate_id == room_id,
-            m.outbox.c.state == "pending").limit(1)):
+    if _coalesce_automatic(conn, MEMBER_EXTRACT, room_id, generation_id, delay_seconds):
         return None
-    delay = max(0, int(delay_seconds)) if observed else 0
+    delay = max(0, int(delay_seconds))
     return conn.execute(
         insert(m.outbox)
         .values(
@@ -107,6 +132,7 @@ def enqueue_member_extraction(conn, scope, generation_id=None, observed=False, d
                 "generation_id": str(generation_id) if generation_id else None,
                 "observed": bool(observed),
                 "pipeline_version": PIPELINE_VERSION,
+                "automatic_turn_ids": [str(generation_id or uuid4())],
             },
             dedupe_key=f"memory-extract-member:{room_id}:{generation_id or uuid4()}",
             available_at=m.now() + timedelta(seconds=delay),
