@@ -52,3 +52,25 @@ async def test_stream_failure_preserves_partial_and_never_exposes_raw_error(db, 
     assert output["content"] == {"text":"你好", "state":"partial"}
     assert db.all("generations")[0]["state"] == "failed"
     assert "private" not in "".join(e.model_dump_json() for e in service.replay(actor, accepted.generation_id, 0))
+
+async def test_streamed_reasoning_is_persisted_in_batches_without_loss(db, actor, seeded_scope, chat_request_factory):
+    from agi_wind.delivery.service import GenerationService
+    from agi_wind.providers.protocol import ProviderChunk
+    class Thinking:
+        async def stream(self, model, messages):
+            for index in range(300):
+                yield ProviderChunk('reasoning', '想' + str(index % 10))
+            yield ProviderChunk('text', '好的。')
+    service = GenerationService(db, Thinking(), model=ModelRef(provider_id="fake", model_id="synthetic"))
+    accepted = await service.submit(actor, chat_request_factory(conversation_id=seeded_scope.conversation_id))
+    assert await service.run(accepted.generation_id)
+    events = service.replay(actor, accepted.generation_id, 0)
+    deltas = [e for e in events if e.type == "reasoning.delta"]
+    expected = "".join('想' + str(index % 10) for index in range(300))
+    # One stream/database write per token used to rewrite the whole event 300 times.
+    assert 0 < len(deltas) <= 4
+    assert "".join(e.payload["text"] for e in deltas) == expected
+    assert [e.type for e in events].index("reasoning.delta") < [e.type for e in events].index("text.delta")
+    output = db.all("events", role="assistant")[0]["content"]
+    assert output["reasoning"] == expected
+    assert [step["text"] for step in output["trace"] if step["type"] == "reasoning"] == [expected]
