@@ -6,10 +6,10 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.delivery.proactive import ProactiveService
-from agi_wind.integrations.qq import QQSettings
-from agi_wind.integrations.qq_groups import ensure_group_binding
+from nagi.archive import models as m
+from nagi.delivery.proactive import ProactiveService
+from nagi.integrations.qq import QQSettings
+from nagi.integrations.qq_groups import ensure_group_binding
 from test_proactive import ProactiveProvider, active_settings, old_user_event, service_with_provider
 
 
@@ -40,7 +40,7 @@ async def test_silent_wake_has_no_message_and_cooldown_survives_restart(db, acto
 
 async def test_schedule_ignores_newer_group_and_sends_owner_qq(db, actor, seeded_scope, tmp_path):
     import asyncio
-    from agi_wind.integrations.qq import QQBridge
+    from nagi.integrations.qq import QQBridge
     proactive, _, _ = setup_wake(db, actor, seeded_scope,
                                  json.dumps({'action':'reach_out','message':'给哥哥的话'}))
     group = ensure_group_binding(db, actor, companion_id=seeded_scope.companion_id,

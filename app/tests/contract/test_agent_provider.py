@@ -1,10 +1,10 @@
 import json
 import httpx
 import pytest
-from agi_wind.core.settings import ProviderSettings
-from agi_wind.core.types import ModelRef
-from agi_wind.core.errors import AppError
-from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+from nagi.core.settings import ProviderSettings
+from nagi.core.types import ModelRef
+from nagi.core.errors import AppError
+from nagi.providers.openai_compatible import OpenAICompatibleProvider
 
 
 async def test_native_tool_turn_preserves_tool_ids_and_reasoning():

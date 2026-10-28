@@ -5,11 +5,11 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from agi_wind.agent.files import FileTools, FilePath, FileWrite, FileDownload
-from agi_wind.agent.permissions import ApprovalQueue
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import Actor
+from nagi.agent.files import FileTools, FilePath, FileWrite, FileDownload
+from nagi.agent.permissions import ApprovalQueue
+from nagi.agent.settings import AgentSettings
+from nagi.core.errors import AppError
+from nagi.core.types import Actor
 
 
 async def current(): pass
@@ -77,7 +77,7 @@ async def test_full_access_edit_requires_hash_and_keeps_original_backup(tmp_path
 
 
 async def test_download_saves_without_overwrite_or_execution(tmp_path, monkeypatch):
-    import agi_wind.agent.files as module
+    import nagi.agent.files as module
     _, _, _, files = setup(tmp_path, 'full')
     monkeypatch.setattr(module.socket, 'getaddrinfo', lambda *a, **kw: [(2,1,6,'',('93.184.216.34',443))])
     actual_client = httpx.AsyncClient

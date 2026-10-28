@@ -1,5 +1,5 @@
 from alembic import op
-from agi_wind.delivery.models import proactive_messages
+from nagi.delivery.models import proactive_messages
 
 revision = '0011_proactive'
 down_revision = '0010_memory_lifecycle'

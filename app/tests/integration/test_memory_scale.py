@@ -4,14 +4,14 @@ import time
 from uuid import uuid4
 from sqlalchemy import select
 from test_memory_semantic import encoder
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.memory import models as mm
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.memory import models as mm
 
 
 async def test_ten_thousand_fact_recall_with_real_source_validation(db, seeded_scope, encoder):
-    from agi_wind.memory.semantic import pack_vector
-    from agi_wind.memory.retrieval import MemoryService
+    from nagi.memory.semantic import pack_vector
+    from nagi.memory.retrieval import MemoryService
     scope = seeded_scope
     vector_other = pack_vector([0.0,1.0] + [0.0]*510)
     vector_target = pack_vector([1.0] + [0.0]*511)

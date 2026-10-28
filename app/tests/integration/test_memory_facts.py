@@ -4,10 +4,10 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest, lock
-from agi_wind.memory import models as mm
-from agi_wind.memory.extraction import ExtractedCandidate, ExtractedSourceRef, MemoryWriter
+from nagi.archive import models as m
+from nagi.archive.repository import digest, lock
+from nagi.memory import models as mm
+from nagi.memory.extraction import ExtractedCandidate, ExtractedSourceRef, MemoryWriter
 
 
 def event(db, scope, text, *, role="user", at=None):
@@ -114,7 +114,7 @@ def test_missing_semantic_value_and_distinct_subjects_do_not_merge(db, seeded_sc
 
 
 async def test_manual_correction_preserves_slot_but_clears_stale_value(db, actor, seeded_scope):
-    from agi_wind.memory.corrections import CorrectionService
+    from nagi.memory.corrections import CorrectionService
     first = event(db, seeded_scope, "我喜欢咖啡")
     commit(db, seeded_scope, [candidate(first)], [first])
     old = db.all("memory_items")[0]
@@ -127,7 +127,7 @@ async def test_manual_correction_preserves_slot_but_clears_stale_value(db, actor
 
 
 def test_pinned_survives_expiry_maintenance_and_access(db, seeded_scope):
-    from agi_wind.memory.lifecycle import freshness, extend_after_access, maintain
+    from nagi.memory.lifecycle import freshness, extend_after_access, maintain
     first = event(db, seeded_scope, "我喜欢咖啡")
     commit(db, seeded_scope, [candidate(first)], [first])
     now = datetime.now(timezone.utc)
@@ -141,7 +141,7 @@ def test_pinned_survives_expiry_maintenance_and_access(db, seeded_scope):
 
 
 def test_retention_and_unpin_expiry_policy(db, seeded_scope):
-    from agi_wind.memory.lifecycle import pin_values, maintain
+    from nagi.memory.lifecycle import pin_values, maintain
     source = event(db, seeded_scope, "我喜欢咖啡")
     with db.engine.begin() as conn:
         lock(conn, seeded_scope.companion_id)
@@ -188,7 +188,7 @@ def test_older_source_cannot_supersede_newer_user_assertion(db, seeded_scope):
 
 
 async def test_hidden_pinned_manual_correction_keeps_hidden_and_pinned(db, actor, seeded_scope):
-    from agi_wind.memory.corrections import CorrectionService
+    from nagi.memory.corrections import CorrectionService
     source = event(db, seeded_scope, "我喜欢咖啡")
     commit(db, seeded_scope, [candidate(source)], [source])
     old_id = db.all("memory_items")[0]["id"]

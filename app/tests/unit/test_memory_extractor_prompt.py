@@ -1,5 +1,5 @@
-from agi_wind.core.types import ModelRef
-from agi_wind.memory.extraction import Extractor
+from nagi.core.types import ModelRef
+from nagi.memory.extraction import Extractor
 
 
 async def test_server_summary_prompt_survives_bounded_repair():

@@ -1,9 +1,9 @@
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.memory import models as mm
-from agi_wind.memory.extraction import ExtractedCandidate, MemoryWriter
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.memory import models as mm
+from nagi.memory.extraction import ExtractedCandidate, MemoryWriter
 
 
 def test_known_predicate_alias_reinforces_historical_spelling_and_preserves_suppression(db, seeded_scope):

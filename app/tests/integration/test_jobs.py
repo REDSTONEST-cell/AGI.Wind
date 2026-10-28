@@ -5,8 +5,8 @@ import pytest
 
 def test_two_workers_claim_once_and_expired_lease_recovers(db, archive, actor, seeded_scope, chat_request_factory):
     import asyncio
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.archive.models import outbox, now
+    from nagi.jobs.worker import Worker
+    from nagi.archive.models import outbox, now
     asyncio.run(archive.accept(actor, chat_request_factory(conversation_id=seeded_scope.conversation_id)))
     worker = Worker(db)
     with ThreadPoolExecutor(2) as pool:
@@ -20,9 +20,9 @@ def test_two_workers_claim_once_and_expired_lease_recovers(db, archive, actor, s
     assert recovered[0]["attempts"] == 2
 
 async def test_retry_limit_and_owner_fencing(db, archive, actor, seeded_scope, chat_request_factory):
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.archive.models import outbox, now
-    from agi_wind.core.errors import AppError
+    from nagi.jobs.worker import Worker
+    from nagi.archive.models import outbox, now
+    from nagi.core.errors import AppError
     await archive.accept(actor, chat_request_factory(conversation_id=seeded_scope.conversation_id))
     worker = Worker(db, jitter=lambda:0)
     for attempt in range(5):

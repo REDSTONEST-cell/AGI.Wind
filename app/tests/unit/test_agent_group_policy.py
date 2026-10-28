@@ -1,8 +1,8 @@
 from uuid import uuid4
 
-from agi_wind.agent.delivery import agent_execution_policy
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.core.types import SceneScope
+from nagi.agent.delivery import agent_execution_policy
+from nagi.agent.settings import AgentSettings
+from nagi.core.types import SceneScope
 
 
 def scope(scene="owner_private", room_id=None):

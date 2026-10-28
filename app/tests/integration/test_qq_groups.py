@@ -5,11 +5,11 @@ import httpx
 import pytest
 from test_client import client_app
 
-from agi_wind.archive import models as m
-from agi_wind.archive.deletions import DeletionLedger
-from agi_wind.integrations.qq import QQSettings, TOKEN_REF
-from agi_wind.integrations.qq_groups import ensure_group_binding
-from agi_wind.providers.protocol import ProviderChunk
+from nagi.archive import models as m
+from nagi.archive.deletions import DeletionLedger
+from nagi.integrations.qq import QQSettings, TOKEN_REF
+from nagi.integrations.qq_groups import ensure_group_binding
+from nagi.providers.protocol import ProviderChunk
 
 BOT = "10002"
 OWNER = "10001"
@@ -99,7 +99,7 @@ async def test_group_mention_opens_persistent_window_and_reuses_archived_event(d
 
 
 async def test_group_follow_up_without_mention_but_not_after_expiry(db, actor, seeded_scope, tmp_path):
-    from agi_wind.integrations.qq_attention import GroupAttention
+    from nagi.integrations.qq_attention import GroupAttention
     provider = Provider("好呀")
     app = client_app(db, actor, tmp_path, provider)
     app.state.service.memory_extraction_enabled = False
@@ -174,7 +174,7 @@ async def test_unlisted_group_is_ignored_before_any_archive(db, actor, seeded_sc
 
 
 async def test_observed_group_message_is_archived_and_queues_coalesced_member_memory(db, actor, seeded_scope, tmp_path):
-    from agi_wind.memory.jobs import MEMBER_EXTRACT
+    from nagi.memory.jobs import MEMBER_EXTRACT
     provider = Provider()
     app = client_app(db, actor, tmp_path, provider)
     app.state.service.memory_extraction_enabled = True

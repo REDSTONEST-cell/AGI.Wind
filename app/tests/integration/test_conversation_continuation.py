@@ -6,9 +6,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.delivery.idle_cognition import IdleCognitionService
-from agi_wind.integrations.qq import QQBridge, QQSettings
+from nagi.archive import models as m
+from nagi.delivery.idle_cognition import IdleCognitionService
+from nagi.integrations.qq import QQBridge, QQSettings
 from test_idle_cognition import make_service, active_settings, cognition, run_turn
 
 
@@ -79,8 +79,8 @@ async def test_waiting_task_yields_to_user_stop_or_changed_context(db,actor,seed
 
 
 async def test_tools_can_run_after_midtask_speech_and_stay_in_budget(db,actor,seeded_scope,chat_request_factory,tmp_path):
-    from agi_wind.agent.settings import AgentSettings
-    from agi_wind.providers.protocol import ToolTurn,ToolCall
+    from nagi.agent.settings import AgentSettings
+    from nagi.providers.protocol import ToolTurn,ToolCall
     service,_,idle,provider,_,sent=await setup_task(db,actor,seeded_scope,chat_request_factory,tmp_path,[])
     service.agent_settings=lambda:AgentSettings(enabled=True)
     turns=[ToolTurn(action('say','我查一下')),ToolTurn(tool_calls=(ToolCall('one','search_memory','{"query":"偏好"}'),)),
@@ -162,7 +162,7 @@ async def test_model_round_limit_is_cumulative_and_wait_is_clamped(db,actor,seed
 
 
 async def test_crashed_active_segment_does_not_replay_side_effects(db,actor,seeded_scope,chat_request_factory,tmp_path):
-    from agi_wind.delivery.models import idle_cognition_runs
+    from nagi.delivery.models import idle_cognition_runs
     _,_,idle,provider,clock,sent=await setup_task(db,actor,seeded_scope,chat_request_factory,tmp_path,
         [action('say','已发消息',300),action('say','不能重放')])
     await idle.tick()
@@ -192,7 +192,7 @@ async def test_continuation_migration_upgrades_existing_rows(db,actor,seeded_sco
 async def test_settings_switch_immediately_cancels_a_saved_wait(db,actor,seeded_scope,chat_request_factory,tmp_path,patch):
     import httpx
     from pydantic import SecretStr
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
     service,proactive,idle,_,_,_=await setup_task(db,actor,seeded_scope,chat_request_factory,tmp_path,
         [action('say','说完等待',300)])
     await idle.tick()

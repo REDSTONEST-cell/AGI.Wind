@@ -1,11 +1,11 @@
 from sqlalchemy import select
-from agi_wind.archive import models as m
-from agi_wind.memory import models as mm
-from agi_wind.archive.repository import digest
+from nagi.archive import models as m
+from nagi.memory import models as mm
+from nagi.archive.repository import digest
 
 
 async def test_confirming_disputed_fact_closes_linked_old_truth_and_keeps_pin(db, actor, seeded_scope):
-    from agi_wind.memory.corrections import CorrectionService
+    from nagi.memory.corrections import CorrectionService
     scope = seeded_scope
     with db.engine.begin() as conn:
         eid = conn.execute(m.events.insert().values(account_id=scope.account_id,companion_id=scope.companion_id,

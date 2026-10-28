@@ -1,5 +1,5 @@
 from sqlalchemy import inspect, select
-from agi_wind.memory import models as mm
+from nagi.memory import models as mm
 
 
 def test_structured_memory_schema_and_legacy_defaults(db, seeded_scope):
@@ -16,7 +16,7 @@ def test_structured_memory_schema_and_legacy_defaults(db, seeded_scope):
 
 
 def test_derived_memory_storage_is_separate_from_portable_archive(db):
-    from agi_wind.archive.exports import ARCHIVE_TABLE_ORDER
+    from nagi.archive.exports import ARCHIVE_TABLE_ORDER
     tables = set(inspect(db.engine).get_table_names())
     assert {'memory_vectors', 'chunk_vectors', 'memory_usage'} <= tables
     assert not {'memory_vectors', 'chunk_vectors', 'memory_usage'} & set(ARCHIVE_TABLE_ORDER)

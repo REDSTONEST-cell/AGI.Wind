@@ -6,8 +6,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from agi_wind.core.settings import Settings
-from agi_wind.core.types import ModelRef
+from nagi.core.settings import Settings
+from nagi.core.types import ModelRef
 
 
 class FakeProvider:
@@ -33,7 +33,7 @@ class FakeExtractor:
 
 
 async def _completed_turn(db, actor, seeded_scope, chat_request_factory, text="以后叫我小风，我不吃香菜"):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     service = GenerationService(db, FakeProvider(), model=ModelRef(provider_id="fake", model_id="test"))
     accepted = await service.submit(actor, chat_request_factory(text=text, conversation_id=seeded_scope.conversation_id))
     assert await service.run(accepted.generation_id)
@@ -48,7 +48,7 @@ def _events(db, role=None):
 def _memory_job(db, worker, worker_id="extractor"):
     # Handler/writer tests deliberately advance past the automatic idle deadline;
     # the real scheduling contract is covered separately by test_memory_schedule.
-    from agi_wind.archive import models as m
+    from nagi.archive import models as m
     with db.engine.begin() as conn:
         conn.execute(m.outbox.update().where(m.outbox.c.event_type == 'memory.extract',
             m.outbox.c.state == 'pending').values(available_at=m.now()-timedelta(seconds=1)))
@@ -59,14 +59,14 @@ def _memory_job(db, worker, worker_id="extractor"):
 
 
 def candidate(kind, content, event_id, quote, epistemic="user_asserted"):
-    from agi_wind.memory.extraction import ExtractedCandidate, ExtractedSourceRef
+    from nagi.memory.extraction import ExtractedCandidate, ExtractedSourceRef
     return ExtractedCandidate(kind=kind, content=content, epistemic_type=epistemic, source_refs=[ExtractedSourceRef(event_id=event_id, quote=quote)])
 
 
 async def test_completed_turn_enqueues_extraction_and_cross_session_recall(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import MEMORY_EXTRACT, enqueue_extraction, run_extraction
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import MEMORY_EXTRACT, enqueue_extraction, run_extraction
+    from nagi.memory.retrieval import MemoryService
+    from nagi.jobs.worker import Worker
 
     accepted = await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
@@ -97,15 +97,15 @@ async def test_completed_turn_enqueues_extraction_and_cross_session_recall(db, a
     recall = [hit for hit in hits if hit.memory_id == memory["id"]]
     assert recall and any(ref.event_id == user_event["id"] for ref in recall[0].source_refs)
     # Scope isolation: another account must not see this memory or source.
-    from agi_wind.core.types import Actor
+    from nagi.core.types import Actor
     other = Actor(account_id=uuid4(), user_id=uuid4())
     other_scope = db.seed(other)
     assert await MemoryService(db).search(other_scope, "叫我什么") == []
 
 
 async def test_rerun_after_crash_is_idempotent_and_never_calls_model_again(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
@@ -122,8 +122,8 @@ async def test_rerun_after_crash_is_idempotent_and_never_calls_model_again(db, a
 
 
 async def test_invalid_extraction_json_retries_without_writing(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     calls = []
@@ -132,7 +132,7 @@ async def test_invalid_extraction_json_retries_without_writing(db, actor, seeded
         calls.append(messages)
         return "这不是 JSON"
 
-    from agi_wind.memory.extraction import Extractor
+    from nagi.memory.extraction import Extractor
     worker = Worker(db, jitter=lambda: 0)
     job = _memory_job(db, worker)
     result = await worker.run_job(job["id"], "extractor", lambda item: run_extraction(db, Extractor(complete, ModelRef(provider_id="fake", model_id="m")), worker, item))
@@ -145,8 +145,8 @@ async def test_invalid_extraction_json_retries_without_writing(db, actor, seeded
 
 
 async def test_forged_and_assistant_user_fact_candidates_are_quarantined(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event, assistant_event = _events(db, "user")[0], _events(db, "assistant")[0]
@@ -164,15 +164,15 @@ async def test_forged_and_assistant_user_fact_candidates_are_quarantined(db, act
 
 
 async def test_source_deleted_during_model_call_cannot_be_committed(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.archive import models as m
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
+    from nagi.archive import models as m
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
 
     async def delete_source(scope, events):
-        from agi_wind.memory import models as mm
+        from nagi.memory import models as mm
         with db.engine.begin() as conn:
             # Mirror the deletion service's derived-first order without creating a ledger here.
             conn.execute(mm.retrieval_chunks.delete().where(mm.retrieval_chunks.c.source_id == user_event["id"]))
@@ -188,10 +188,10 @@ async def test_source_deleted_during_model_call_cannot_be_committed(db, actor, s
 
 
 async def test_lost_lease_never_writes_memory(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.archive import models as m
-    from agi_wind.core.errors import AppError
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
+    from nagi.archive import models as m
+    from nagi.core.errors import AppError
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
@@ -208,10 +208,10 @@ async def test_lost_lease_never_writes_memory(db, actor, seeded_scope, chat_requ
 
 
 async def test_correction_replaces_structured_current_fact(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.memory.corrections import CorrectionService
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
+    from nagi.memory.retrieval import MemoryService
+    from nagi.memory.corrections import CorrectionService
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory, text="我喜欢咖啡")
     user_event = _events(db, "user")[0]
@@ -230,10 +230,10 @@ async def test_correction_replaces_structured_current_fact(db, actor, seeded_sco
 
 async def test_gateway_worker_runs_extraction_after_real_chat_loop(db, actor, seeded_scope, tmp_path, monkeypatch):
     """End-to-end through create_app's outbox loop: chat -> archive -> extract -> memory."""
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
     # This test covers the real worker, not a two-minute wall-clock wait.
-    monkeypatch.setattr('agi_wind.memory.jobs.AUTO_EXTRACT_IDLE_SECONDS', 0)
+    monkeypatch.setattr('nagi.memory.jobs.AUTO_EXTRACT_IDLE_SECONDS', 0)
 
     class DynamicExtractor:
         async def extract(self, scope, events):
@@ -245,7 +245,7 @@ async def test_gateway_worker_runs_extraction_after_real_chat_loop(db, actor, se
 
     service = GenerationService(db, FakeProvider(), model=ModelRef(provider_id="fake", model_id="test"))
     service.memory_extractor = DynamicExtractor()
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     DeletionLedger(tmp_path / "governance").initialize()
     app = create_app(Settings(access_token="synthetic", data_dir=tmp_path), db, actor, service)
     async with app.router.lifespan_context(app):
@@ -268,11 +268,11 @@ async def test_gateway_worker_runs_extraction_after_real_chat_loop(db, actor, se
 
 
 async def test_hide_restore_query_filter_and_extraction_does_not_resurrect(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.core.types import Actor
-    from agi_wind.core.errors import AppError
+    from nagi.memory.jobs import run_extraction
+    from nagi.memory.retrieval import MemoryService
+    from nagi.jobs.worker import Worker
+    from nagi.core.types import Actor
+    from nagi.core.errors import AppError
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
@@ -317,9 +317,9 @@ async def test_hide_restore_query_filter_and_extraction_does_not_resurrect(db, a
 
 
 async def test_memory_list_detail_and_job_status_api(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.api.app import create_app
+    from nagi.memory.jobs import run_extraction
+    from nagi.jobs.worker import Worker
+    from nagi.api.app import create_app
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]

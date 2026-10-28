@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const source = await readFile(new URL('../app/src/agi_wind/api/client/log-view.js', import.meta.url));
+const source = await readFile(new URL('../app/src/nagi/api/client/log-view.js', import.meta.url));
 const { simpleLogRow, plainTime } = await import('data:text/javascript;base64,' + source.toString('base64'));
 
 test('thinking and replies keep the round/step but lose the technical stage', () => {

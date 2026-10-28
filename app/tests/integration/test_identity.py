@@ -1,11 +1,11 @@
 from uuid import uuid4
 import pytest
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import Actor, ModelRef
+from nagi.core.errors import AppError
+from nagi.core.types import Actor, ModelRef
 
 
 async def test_identity_survives_model_switch_and_persona_history(db, actor, seeded_scope):
-    from agi_wind.identity.service import IdentityService
+    from nagi.identity.service import IdentityService
     identity = IdentityService(db)
     initial = await identity.snapshot(actor, seeded_scope.companion_id)
     updated = await identity.update(actor, initial.companion_id, 1, {"core": {"name": "风"}, "style": {"tone": "温柔"}})
@@ -21,7 +21,7 @@ async def test_identity_survives_model_switch_and_persona_history(db, actor, see
 
 
 async def test_proposals_cannot_overwrite_core_or_cross_account(db, actor, seeded_scope):
-    from agi_wind.identity.service import IdentityService
+    from nagi.identity.service import IdentityService
     identity = IdentityService(db)
     with pytest.raises(AppError):
         await identity.update(actor, seeded_scope.companion_id, 1, {"core": {"name": "自动覆盖"}}, origin="assistant")
@@ -31,7 +31,7 @@ async def test_proposals_cannot_overwrite_core_or_cross_account(db, actor, seede
 
 
 async def test_persona_patch_rejects_removed_relationship_dates(db, actor, seeded_scope):
-    from agi_wind.identity.service import IdentityService
+    from nagi.identity.service import IdentityService
     identity = IdentityService(db)
     with pytest.raises(AppError) as error:
         await identity.update(actor, seeded_scope.companion_id, 1, {"relationship": {"first_met_at": "2026-01-01"}})
@@ -39,9 +39,9 @@ async def test_persona_patch_rejects_removed_relationship_dates(db, actor, seede
 
 
 async def test_relationship_and_commitments_shared_across_conversations(db, actor, seeded_scope):
-    from agi_wind.identity.service import IdentityService
-    from agi_wind.identity.models import relationships, commitments
-    from agi_wind.archive.models import conversations
+    from nagi.identity.service import IdentityService
+    from nagi.identity.models import relationships, commitments
+    from nagi.archive.models import conversations
     with db.engine.begin() as conn:
         conn.execute(relationships.insert().values(companion_id=seeded_scope.companion_id, user_id=actor.user_id, data={"addressing": "小风"}))
         conn.execute(commitments.insert().values(companion_id=seeded_scope.companion_id, user_id=actor.user_id, content="周末一起看海", status="pending"))

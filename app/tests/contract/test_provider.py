@@ -2,12 +2,12 @@ import json
 from uuid import uuid4
 import httpx
 import pytest
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import ModelRef
-from agi_wind.core.settings import ProviderSettings
+from nagi.core.errors import AppError
+from nagi.core.types import ModelRef
+from nagi.core.settings import ProviderSettings
 
 async def test_stream_payload_filters_parameters_and_decodes_deltas():
-    from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+    from nagi.providers.openai_compatible import OpenAICompatibleProvider
     captured = []
     def handle(request):
         captured.append(json.loads(request.content))
@@ -24,7 +24,7 @@ async def test_stream_payload_filters_parameters_and_decodes_deltas():
     await provider.aclose()
 
 async def test_provider_error_is_redacted_and_stream_truncation_is_failure():
-    from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+    from nagi.providers.openai_compatible import OpenAICompatibleProvider
     config = ProviderSettings(base_url="https://vendor.invalid/v1", credential_ref="UNUSED")
     for response in [httpx.Response(401, text="synthetic-secret private upstream path"), httpx.Response(200, text='data: {"choices":[{"delta":{"content":"半句"}}]}\n\n')]:
         provider = OpenAICompatibleProvider(config, "synthetic-secret", httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)))
@@ -36,7 +36,7 @@ async def test_provider_error_is_redacted_and_stream_truncation_is_failure():
 
 
 async def test_reasoning_alias_and_content_are_separate_ordered_chunks():
-    from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+    from nagi.providers.openai_compatible import OpenAICompatibleProvider
     config = ProviderSettings(base_url='https://vendor.invalid/v1', credential_ref='UNUSED')
     lines = [json.dumps({'choices':[{'delta':delta}]}) for delta in (
         {'reasoning_content':'先思考', 'content':'回答'}, {'reasoning':'再思考'}, {'content':'完成'})]

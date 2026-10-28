@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from agi_wind.integrations.qq import QQSettings
-from agi_wind.integrations.qq_debounce import (
+from nagi.integrations.qq import QQSettings
+from nagi.integrations.qq_debounce import (
     DebounceConfig, QQDebouncer, config_from_policy, looks_finished, merge_text,
 )
 

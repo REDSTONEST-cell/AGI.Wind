@@ -1,7 +1,7 @@
 from uuid import uuid4
 from sqlalchemy import select
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
+from nagi.archive import models as m
+from nagi.archive.repository import digest
 
 
 def add_event(conn, scope, text, conversation_id=None):
@@ -12,8 +12,8 @@ def add_event(conn, scope, text, conversation_id=None):
 
 
 async def test_character_limited_batch_leaves_a_durable_continuation(db, seeded_scope):
-    from agi_wind.memory.jobs import enqueue_extraction,run_extraction
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import enqueue_extraction,run_extraction
+    from nagi.jobs.worker import Worker
     with db.engine.begin() as conn:
         for _ in range(8): add_event(conn,seeded_scope,'合'*4000)
         enqueue_extraction(conn,seeded_scope,uuid4())
@@ -30,10 +30,10 @@ async def test_character_limited_batch_leaves_a_durable_continuation(db, seeded_
 
 
 async def test_other_user_sources_are_not_offered_or_accepted(db, seeded_scope):
-    from agi_wind.memory.jobs import enqueue_extraction,run_extraction
-    from agi_wind.memory.consolidation import enqueue_consolidation
-    from agi_wind.memory.extraction import ExtractedCandidate,ExtractedSourceRef,MemoryWriter
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import enqueue_extraction,run_extraction
+    from nagi.memory.consolidation import enqueue_consolidation
+    from nagi.memory.extraction import ExtractedCandidate,ExtractedSourceRef,MemoryWriter
+    from nagi.jobs.worker import Worker
     scope=seeded_scope
     with db.engine.begin() as conn:
         other=uuid4();conn.execute(m.users.insert().values(id=other,account_id=scope.account_id))

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from agi_wind.delivery.output_guard import time_context
+from nagi.delivery.output_guard import time_context
 
 
 def test_clock_is_local_and_timeline_is_ordered():

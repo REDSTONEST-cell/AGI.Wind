@@ -9,10 +9,10 @@ pytestmark=[pytest.mark.live,pytest.mark.skipif(os.environ.get('AGI_RUN_VISUAL_L
 
 
 async def test_real_vendor_image_reply_and_reflection(db,actor,seeded_scope,chat_request_factory,tmp_path,monkeypatch):
-    from agi_wind.api.app import from_env
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.providers.vision import VisionAdapter
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import from_env
+    from nagi.archive.assets import AssetStore
+    from nagi.providers.vision import VisionAdapter
+    from nagi.delivery.service import GenerationService
     root=Path(__file__).resolve().parents[3]
     monkeypatch.setenv('AGI_CONFIG',str(root/'config/app.local.yaml'))
     source_app=from_env(); real=source_app.state.service

@@ -6,12 +6,12 @@ import httpx
 import pytest
 from sqlalchemy import text
 
-from agi_wind.archive.assets import AssetStore
-from agi_wind.core.settings import Settings, VoiceSettings
-from agi_wind.core.types import ModelRef
-from agi_wind.delivery.service import GenerationService
-from agi_wind.voice.engine import WavAudio
-from agi_wind.voice.service import VoiceService
+from nagi.archive.assets import AssetStore
+from nagi.core.settings import Settings, VoiceSettings
+from nagi.core.types import ModelRef
+from nagi.delivery.service import GenerationService
+from nagi.voice.engine import WavAudio
+from nagi.voice.service import VoiceService
 
 
 def wav_bytes(seconds=0.2, rate=24000):
@@ -48,7 +48,7 @@ class VoiceProvider:
 
 
 async def build_app(db, actor, tmp_path):
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
 
     settings = Settings(
         access_token="synthetic-private-token",
@@ -116,7 +116,7 @@ async def test_invalid_voice_settings_are_rejected(db, actor, seeded_scope, tmp_
 
 
 async def test_history_returns_audio_attachment(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
 
     settings = Settings(
         access_token="synthetic-private-token",

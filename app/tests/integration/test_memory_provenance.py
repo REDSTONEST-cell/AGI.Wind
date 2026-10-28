@@ -3,8 +3,8 @@ from sqlalchemy import select
 import pytest
 
 async def test_hallucinated_birthday_and_assistant_user_fact_quarantined(db, archive, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.extraction import MemoryWriter, MemoryCandidate
-    from agi_wind.core.types import SourceRef
+    from nagi.memory.extraction import MemoryWriter, MemoryCandidate
+    from nagi.core.types import SourceRef
     accepted = await archive.accept(actor, chat_request_factory(text="今天看海",conversation_id=seeded_scope.conversation_id))
     event = db.all("events")[0]
     await archive.append_output(accepted.generation_id,"我小时候住海边")
@@ -18,9 +18,9 @@ async def test_hallucinated_birthday_and_assistant_user_fact_quarantined(db, arc
     assert db.count("memory_items") == 0
 
 async def test_verifiable_quote_stores_and_revision_change_blocks_stale_job(db, archive, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.extraction import MemoryWriter, MemoryCandidate
-    from agi_wind.core.types import SourceRef
-    from agi_wind.archive.models import companions
+    from nagi.memory.extraction import MemoryWriter, MemoryCandidate
+    from nagi.core.types import SourceRef
+    from nagi.archive.models import companions
     await archive.accept(actor, chat_request_factory(text="故事设定：我住在月球",conversation_id=seeded_scope.conversation_id))
     event = db.all("events")[0]
     candidate = MemoryCandidate(kind="episode",content="我住在月球",epistemic_type="fictional",source_refs=[SourceRef(event_id=event["id"],start_offset=5,end_offset=10)])

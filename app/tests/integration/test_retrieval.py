@@ -2,8 +2,8 @@ from uuid import uuid4
 import pytest
 
 async def test_chinese_dates_models_and_scope_without_vectors(db, archive, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.core.types import Actor
+    from nagi.memory.retrieval import MemoryService
+    from nagi.core.types import Actor
     for text in ["去年小王不喝咖啡，今年小王改喝茶。", "2026-10-25购买RTX4060，准备训练声音。", "故事设定：另一个小王住在月球上。"]:
         await archive.accept(actor, chat_request_factory(text=text, conversation_id=seeded_scope.conversation_id))
     memory = MemoryService(db)

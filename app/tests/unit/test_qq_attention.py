@@ -1,7 +1,7 @@
 from uuid import uuid4
 
-from agi_wind.integrations.qq_attention import GroupAttention
-from agi_wind.integrations.qq_groups import group_allowed, group_message
+from nagi.integrations.qq_attention import GroupAttention
+from nagi.integrations.qq_groups import group_allowed, group_message
 
 
 def message(text="你好", **overrides):
@@ -67,7 +67,7 @@ def group_event(**overrides):
 
 
 def test_group_message_normalizes_identity_and_never_trusts_role():
-    from agi_wind.integrations.qq import QQSettings
+    from nagi.integrations.qq import QQSettings
     settings = QQSettings(enabled=True, owner_qq="10001", bot_qq="10002", conversation_id=uuid4(),
                           group_enabled=True, allowed_groups=["123456789"])
     normalized = group_message(group_event(), settings)
@@ -78,7 +78,7 @@ def test_group_message_normalizes_identity_and_never_trusts_role():
 
 
 def test_group_message_rejects_foreign_bot_and_disabled_groups():
-    from agi_wind.integrations.qq import QQSettings
+    from nagi.integrations.qq import QQSettings
     settings = QQSettings(enabled=True, owner_qq="10001", bot_qq="10002", conversation_id=uuid4(),
                           group_enabled=True, allowed_groups=["123456789"])
     assert group_message(group_event(self_id=999), settings) is None

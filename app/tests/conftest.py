@@ -11,13 +11,13 @@ from sqlalchemy.engine import make_url
 
 @pytest.fixture
 def actor():
-    from agi_wind.core.types import Actor
+    from nagi.core.types import Actor
     return Actor(account_id=uuid4(), user_id=uuid4())
 
 
 @pytest.fixture
 def chat_request_factory():
-    from agi_wind.core.types import ChatRequest
+    from nagi.core.types import ChatRequest
     def factory(text="合成测试", conversation_id=None, **kw):
         return ChatRequest(request_id=kw.pop("request_id", uuid4()), conversation_id=conversation_id or uuid4(), input={"text": text}, device_id="test", **kw)
     return factory
@@ -32,7 +32,7 @@ def fake_clock():
 def db():
     from alembic import command
     from alembic.config import Config
-    from agi_wind.archive.repository import Database
+    from nagi.archive.repository import Database
     root = Path(__file__).resolve().parents[2]
     url = os.environ.get("AGI_TEST_DATABASE_URL")
     if not url:
@@ -68,5 +68,5 @@ def seeded_scope(db, actor):
 
 @pytest.fixture
 def archive(db):
-    from agi_wind.archive.service import ArchiveService
+    from nagi.archive.service import ArchiveService
     return ArchiveService(db)

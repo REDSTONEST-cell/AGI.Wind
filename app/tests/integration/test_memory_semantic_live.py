@@ -6,14 +6,14 @@ from types import SimpleNamespace
 import pytest
 
 from test_memory_semantic import fact
-from agi_wind.memory.retrieval import MemoryService
+from nagi.memory.retrieval import MemoryService
 
 pytestmark = [pytest.mark.live, pytest.mark.skipif(os.environ.get("AGI_MEMORY_MODEL_SMOKE") != "1",
     reason="explicit AGI_MEMORY_MODEL_SMOKE=1 required for real CPU model I/O")]
 
 
 async def test_real_cpu_chinese_paraphrase_in_temporary_postgres(db, seeded_scope):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     root = Path(__file__).resolve().parents[3]
     db.memory_settings = SimpleNamespace(data_dir=root/"data",memory_semantic_enabled=True)
     coffee, _ = fact(db,seeded_scope,"我最爱喝咖啡，每天早上喝一杯。")

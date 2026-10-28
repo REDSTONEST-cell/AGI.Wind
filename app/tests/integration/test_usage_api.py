@@ -4,10 +4,10 @@ from uuid import uuid4
 import httpx
 from test_client import client_app
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.delivery import models as dm
-from agi_wind.usage import estimate_tokens
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.delivery import models as dm
+from nagi.usage import estimate_tokens
 
 BEARER = {"Authorization": "Bearer synthetic-private-token"}
 

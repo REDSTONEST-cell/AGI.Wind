@@ -2,7 +2,7 @@ from io import BytesIO
 from uuid import uuid4
 from PIL import Image
 import pytest
-from agi_wind.core.errors import AppError
+from nagi.core.errors import AppError
 
 
 def image():
@@ -19,7 +19,7 @@ def jpeg_image():
 
 async def test_mislabeled_extension_is_stored_as_its_decoded_format(db, actor, seeded_scope, tmp_path):
     """Drag-and-drop temp files often hold JPEG/WebP bytes under a .png name."""
-    from agi_wind.archive.assets import AssetStore
+    from nagi.archive.assets import AssetStore
     store = AssetStore(db, tmp_path)
     asset = await store.put(actor, BytesIO(jpeg_image()), "image/png", original_filename="TempDragFile(1).png")
     assert asset["mime"] == "image/jpeg"
@@ -31,8 +31,8 @@ async def test_mislabeled_extension_is_stored_as_its_decoded_format(db, actor, s
 
 
 async def test_asset_dedup_does_not_grant_cross_account_access(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.core.types import Actor
+    from nagi.archive.assets import AssetStore
+    from nagi.core.types import Actor
     store = AssetStore(db, tmp_path)
     first = await store.put(actor, BytesIO(image()), "image/png")
     again = await store.put(actor, BytesIO(image()), "image/png")
@@ -44,7 +44,7 @@ async def test_asset_dedup_does_not_grant_cross_account_access(db, actor, seeded
 
 
 async def test_invalid_truncated_and_oversize_uploads_never_ready(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.assets import AssetStore
+    from nagi.archive.assets import AssetStore
     store = AssetStore(db, tmp_path, max_bytes=120)
     for data in (b"not an image", image()[:20], b"x" * 121):
         with pytest.raises(AppError):

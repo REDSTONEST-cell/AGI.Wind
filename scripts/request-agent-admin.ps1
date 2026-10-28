@@ -45,7 +45,7 @@ try {
 
     $pythonExe = Join-Path $projectRoot 'app\.venv\Scripts\python.exe'
     if (-not (Test-Path -LiteralPath $pythonExe)) { throw 'python environment not found' }
-    $argsList = @('-m', 'agi_wind.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$listenPort", '--host', $bindHost)
+    $argsList = @('-m', 'nagi.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$listenPort", '--host', $bindHost)
     $process = Start-Process -FilePath $pythonExe -ArgumentList $argsList -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'gateway.stdout.log') -RedirectStandardError (Join-Path $stateDir 'gateway.stderr.log') -PassThru
     [IO.File]::WriteAllText((Join-Path $stateDir 'gateway.pid'), "$($process.Id)")
     [IO.File]::WriteAllText((Join-Path $stateDir 'gateway-port.txt'), "$listenPort")

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-const source=await readFile(new URL('../app/src/agi_wind/api/client/audio.js',import.meta.url),'utf8');
+const source=await readFile(new URL('../app/src/nagi/api/client/audio.js',import.meta.url),'utf8');
 const tick=()=>new Promise(r=>setImmediate(r));
 async function setup(){
   const module=await import('data:text/javascript;base64,'+Buffer.from(source+'\n// '+Math.random()).toString('base64'));

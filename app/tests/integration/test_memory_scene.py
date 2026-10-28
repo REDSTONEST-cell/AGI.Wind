@@ -2,14 +2,14 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.archive.service import ArchiveService
-from agi_wind.core.types import ChatInput, ModelRef, SceneScope, SourceRef
-from agi_wind.integrations.qq_groups import ensure_group_binding, ensure_principal
-from agi_wind.memory import models as mm
-from agi_wind.memory.extraction import MemoryCandidate, MemoryWriter
-from agi_wind.memory.retrieval import MemoryService
-from agi_wind.memory.jobs import _load_batch
+from nagi.archive import models as m
+from nagi.archive.service import ArchiveService
+from nagi.core.types import ChatInput, ModelRef, SceneScope, SourceRef
+from nagi.integrations.qq_groups import ensure_group_binding, ensure_principal
+from nagi.memory import models as mm
+from nagi.memory.extraction import MemoryCandidate, MemoryWriter
+from nagi.memory.retrieval import MemoryService
+from nagi.memory.jobs import _load_batch
 
 BOT = "10002"
 OWNER = "10001"
@@ -103,8 +103,8 @@ async def test_owner_extraction_ignores_member_voice_and_marks_group_fact_public
 
 
 async def test_group_context_has_speaker_labels_and_no_owner_private_relationship(db, actor, seeded_scope):
-    from agi_wind.identity import models as im
-    from agi_wind.memory.context import ContextBuilder
+    from nagi.identity import models as im
+    from nagi.memory.context import ContextBuilder
     binding = room(db, actor, seeded_scope.companion_id, GROUP_A)
     conversation_id = binding["conversation_id"]
     member = ensure_principal(db, actor, external_user_id="736357841", nickname="小明", card="群名片")
@@ -119,7 +119,7 @@ async def test_group_context_has_speaker_labels_and_no_owner_private_relationshi
             user_id=actor.user_id, content="主人私密承诺", status="pending"))
     _, group_scope = scopes(actor, seeded_scope.companion_id, conversation_id, binding["id"])
     owner_scope, _ = scopes(actor, seeded_scope.companion_id, seeded_scope.conversation_id)
-    from agi_wind.identity.service import IdentityService
+    from nagi.identity.service import IdentityService
     assert len((await IdentityService(db).snapshot_scene(owner_scope)).commitments) == 1
     assert (await IdentityService(db).snapshot_scene(group_scope)).commitments == []
     context = await ContextBuilder(db).build(group_scope, ChatInput(text="咖啡"),

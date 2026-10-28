@@ -1,7 +1,7 @@
 from alembic import op
 from sqlalchemy import text
-from agi_wind.memory.models import MEMORY_TABLES
-from agi_wind.archive.models import metadata
+from nagi.memory.models import MEMORY_TABLES
+from nagi.archive.models import metadata
 revision = "0003_memory"
 down_revision = "0002_identity"
 def upgrade():

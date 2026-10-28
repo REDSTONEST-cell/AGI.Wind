@@ -2,7 +2,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from agi_wind.core.types import ModelRef
+from nagi.core.types import ModelRef
 
 class FakeProvider:
     def __init__(self, fail=False): self.calls, self.fail = 0, fail
@@ -13,7 +13,7 @@ class FakeProvider:
         yield "，世界。"
 
 async def test_duplicate_submit_and_reconnect_never_regenerate(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     provider = FakeProvider()
     service = GenerationService(db, provider, model=ModelRef(provider_id="fake", model_id="synthetic"))
     request = chat_request_factory(conversation_id=seeded_scope.conversation_id)
@@ -35,7 +35,7 @@ async def test_duplicate_submit_and_reconnect_never_regenerate(db, actor, seeded
     assert db.all("events", role="assistant")[0]["content"]["state"] == "complete"
 
 async def test_db_failure_never_calls_provider(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     provider = FakeProvider()
     service = GenerationService(db, provider, model=ModelRef(provider_id="fake",model_id="test"))
     with db.engine.begin() as conn: conn.execute(text("ALTER TABLE outbox ADD CONSTRAINT fail_write CHECK(false)"))
@@ -44,7 +44,7 @@ async def test_db_failure_never_calls_provider(db, actor, seeded_scope, chat_req
     assert provider.calls == 0
 
 async def test_stream_failure_preserves_partial_and_never_exposes_raw_error(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     service = GenerationService(db, FakeProvider(fail=True), model=ModelRef(provider_id="fake",model_id="test"))
     accepted = await service.submit(actor, chat_request_factory(conversation_id=seeded_scope.conversation_id))
     await service.run(accepted.generation_id)
@@ -54,8 +54,8 @@ async def test_stream_failure_preserves_partial_and_never_exposes_raw_error(db, 
     assert "private" not in "".join(e.model_dump_json() for e in service.replay(actor, accepted.generation_id, 0))
 
 async def test_streamed_reasoning_is_persisted_in_batches_without_loss(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.providers.protocol import ProviderChunk
+    from nagi.delivery.service import GenerationService
+    from nagi.providers.protocol import ProviderChunk
     class Thinking:
         async def stream(self, model, messages):
             for index in range(300):

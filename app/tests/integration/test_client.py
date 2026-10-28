@@ -2,12 +2,12 @@ import asyncio
 from uuid import uuid4
 import httpx
 import pytest
-from agi_wind.core.settings import Settings
-from agi_wind.core.types import ModelRef
+from nagi.core.settings import Settings
+from nagi.core.types import ModelRef
 
 def client_app(db,actor,tmp_path,provider=None):
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
     settings=Settings(access_token="synthetic-private-token",data_dir=tmp_path)
     service=GenerationService(db,provider,ModelRef(provider_id="fake",model_id="test") if provider else None)
     return create_app(settings,db,actor,service)
@@ -71,7 +71,7 @@ async def test_client_sources_are_authorized_and_static_does_not_leak_token(db,a
 async def test_reference_client_cookie_can_submit_and_receive_stream(db,actor,seeded_scope,tmp_path):
     from test_generation import FakeProvider
     app=client_app(db,actor,tmp_path,FakeProvider())
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     DeletionLedger(tmp_path/'governance').initialize()
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:

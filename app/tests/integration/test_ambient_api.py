@@ -2,9 +2,9 @@ from datetime import datetime, timezone
 
 import httpx
 
-from agi_wind.ambient.models import ambient_observations
-from agi_wind.api.app import create_app
-from agi_wind.core.settings import Settings
+from nagi.ambient.models import ambient_observations
+from nagi.api.app import create_app
+from nagi.core.settings import Settings
 from test_client import connect
 
 

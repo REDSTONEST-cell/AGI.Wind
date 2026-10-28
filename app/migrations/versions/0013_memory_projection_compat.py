@@ -1,7 +1,7 @@
 """Bring pre-existing experimental memory projections up to the final schema."""
 from alembic import op
 import sqlalchemy as sa
-from agi_wind.memory.models import MEMORY_DERIVED_TABLES
+from nagi.memory.models import MEMORY_DERIVED_TABLES
 
 revision = '0013_memory_projection_compat'
 down_revision = '0012_memory_completion'

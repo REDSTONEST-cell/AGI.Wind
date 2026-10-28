@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 from uuid import UUID
 from sqlalchemy import select
-from agi_wind.memory import models as mm
+from nagi.memory import models as mm
 
 
 async def test_structured_pinned_memory_survives_clone_without_derived_vectors(db, actor, seeded_scope, archive, chat_request_factory, tmp_path):
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
+    from nagi.archive.deletions import DeletionLedger
     accepted = await archive.accept(actor,chat_request_factory(text='合成移植测试：我喜欢咖啡',conversation_id=seeded_scope.conversation_id))
     await archive.append_output(accepted.generation_id,'合成测试已记录',final_state='complete')
     user_event = next(row for row in db.all('events') if row['role'] == 'user')

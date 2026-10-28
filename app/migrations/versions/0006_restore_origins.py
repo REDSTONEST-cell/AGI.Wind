@@ -1,5 +1,5 @@
 from alembic import op
-from agi_wind.archive.provenance import archive_origins
+from nagi.archive.provenance import archive_origins
 revision="0006_restore_origins"
 down_revision="0005_deletions"
 def upgrade(): archive_origins.create(op.get_bind())

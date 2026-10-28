@@ -4,8 +4,8 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.integrations.qq import QQBridge, QQSettings, private_message
-from agi_wind.integrations.qq_groups import group_message
+from nagi.integrations.qq import QQBridge, QQSettings, private_message
+from nagi.integrations.qq_groups import group_message
 
 
 def test_voice_only_private_and_group_messages_are_accepted():
@@ -22,7 +22,7 @@ def test_voice_only_private_and_group_messages_are_accepted():
 
 
 async def test_prepare_input_uses_real_qq_transcript_and_cached_image(tmp_path, monkeypatch):
-    from agi_wind.integrations import qq
+    from nagi.integrations import qq
     asset_id = uuid4()
     class Assets:
         max_image_bytes = 1000
@@ -90,7 +90,7 @@ async def test_waits_only_for_current_generations_speech(monkeypatch):
 
 
 async def test_http_qq_images_upgrade_to_https_before_download(monkeypatch):
-    from agi_wind.integrations import qq
+    from nagi.integrations import qq
     seen = []
     def dns(host, port, **kwargs):
         seen.append(host)

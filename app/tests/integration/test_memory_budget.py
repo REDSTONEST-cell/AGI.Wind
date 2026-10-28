@@ -12,8 +12,8 @@ class Limits:
 
 
 def test_budget_reservation_is_atomic_and_settlement_is_idempotent(db, seeded_scope):
-    from agi_wind.memory.budget import MemoryBudget
-    from agi_wind.core.errors import AppError
+    from nagi.memory.budget import MemoryBudget
+    from nagi.core.errors import AppError
     budget = MemoryBudget(db, Limits())
     job = uuid4()
     first = budget.reserve(seeded_scope, job, 1, 400, 400)
@@ -30,8 +30,8 @@ def test_budget_reservation_is_atomic_and_settlement_is_idempotent(db, seeded_sc
 
 
 def test_zero_budget_blocks_before_provider_and_unknown_usage_keeps_bound(db, seeded_scope):
-    from agi_wind.memory.budget import MemoryBudget
-    from agi_wind.core.errors import AppError
+    from nagi.memory.budget import MemoryBudget
+    from nagi.core.errors import AppError
     limits = Limits(memory_daily_budget_usd=0)
     with pytest.raises(AppError):
         MemoryBudget(db, limits).reserve(seeded_scope, uuid4(), 1, 1, 1)

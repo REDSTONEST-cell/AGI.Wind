@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const source=await readFile(new URL('../app/src/agi_wind/api/client/reply-segments.js',import.meta.url));
+const source=await readFile(new URL('../app/src/nagi/api/client/reply-segments.js',import.meta.url));
 const { splitReply }=await import('data:text/javascript;base64,'+source.toString('base64'));
 const texts=value=>splitReply(value).map(part=>part.text);
 

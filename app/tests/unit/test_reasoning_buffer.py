@@ -1,4 +1,4 @@
-from agi_wind.delivery.reasoning import ReasoningBuffer
+from nagi.delivery.reasoning import ReasoningBuffer
 
 
 async def test_buffer_batches_by_size_and_time_and_keeps_order():

@@ -5,11 +5,11 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.agent.commands import CommandArgs, CommandTools
-from agi_wind.agent.permissions import ApprovalQueue
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import Actor
+from nagi.agent.commands import CommandArgs, CommandTools
+from nagi.agent.permissions import ApprovalQueue
+from nagi.agent.settings import AgentSettings
+from nagi.core.errors import AppError
+from nagi.core.types import Actor
 
 
 async def current(): pass

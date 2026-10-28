@@ -1,6 +1,6 @@
 from alembic import context
 from sqlalchemy import create_engine
-from agi_wind.archive.models import metadata
+from nagi.archive.models import metadata
 
 def migrate(connection):
     context.configure(connection=connection, target_metadata=metadata, version_table_schema=connection.exec_driver_sql("SELECT current_schema()").scalar())

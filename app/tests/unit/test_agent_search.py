@@ -1,9 +1,9 @@
 import httpx
 import pytest
 import json
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.agent.search import WebSearch
-from agi_wind.core.errors import AppError
+from nagi.agent.settings import AgentSettings
+from nagi.agent.search import WebSearch
+from nagi.core.errors import AppError
 
 
 class Secrets:
@@ -11,7 +11,7 @@ class Secrets:
 
 
 async def test_deepseek_search_and_fetch_use_official_post_and_separate_key():
-    from agi_wind.agent.tools import StationTools
+    from nagi.agent.tools import StationTools
     class Keys:
         def get(self, ref): return 'deepseek-test-key' if ref.endswith('_DEEPSEEK') else None
     seen = []
@@ -59,10 +59,10 @@ def test_deepseek_requires_its_own_key():
 
 
 def test_search_credentials_reuse_official_deepseek_and_follow_changes(tmp_path):
-    from agi_wind.agent.search import SearchCredentials
-    from agi_wind.agent.settings import search_secret_ref
-    from agi_wind.core.settings import Settings, ProviderSettings
-    from agi_wind.core.secrets import SecretStore
+    from nagi.agent.search import SearchCredentials
+    from nagi.agent.settings import search_secret_ref
+    from nagi.core.settings import Settings, ProviderSettings
+    from nagi.core.secrets import SecretStore
     store = SecretStore(tmp_path)
     store.set('MODEL_KEY', 'synthetic-model-key')
     settings = Settings(providers={'ds': ProviderSettings(base_url='https://api.deepseek.com/v1', credential_ref='MODEL_KEY')})

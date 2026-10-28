@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from agi_wind.agent import tools as tools_module
-from agi_wind.agent.tools import StationTools, StickerQuery
+from nagi.agent import tools as tools_module
+from nagi.agent.tools import StationTools, StickerQuery
 
 
 class FakeStickerService:

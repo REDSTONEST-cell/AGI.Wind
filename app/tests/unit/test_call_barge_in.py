@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def test_barge_in_cancels_inflight_tts_and_replenishes_only_current_epoch(tmp_path, monkeypatch):
-    from agi_wind.voice import call as module
+    from nagi.voice import call as module
     import websockets.asyncio.client
 
     class Upstream:

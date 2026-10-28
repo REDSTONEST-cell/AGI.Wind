@@ -5,13 +5,13 @@ import wave
 
 import pytest
 
-from agi_wind.archive.assets import AssetStore
-from agi_wind.core.errors import AppError
-from agi_wind.core.settings import VoiceSettings
-from agi_wind.core.types import ModelRef
-from agi_wind.delivery.service import GenerationService
-from agi_wind.voice.engine import WavAudio
-from agi_wind.voice.service import VoiceService
+from nagi.archive.assets import AssetStore
+from nagi.core.errors import AppError
+from nagi.core.settings import VoiceSettings
+from nagi.core.types import ModelRef
+from nagi.delivery.service import GenerationService
+from nagi.voice.engine import WavAudio
+from nagi.voice.service import VoiceService
 
 
 def wav_bytes(seconds=0.2, rate=24000):
@@ -240,8 +240,8 @@ async def test_voice_off_has_no_segment(db, actor, seeded_scope, chat_request_fa
 
 
 async def test_agent_tool_reply_keeps_hidden_emotion_and_playable_voice(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.agent.settings import AgentSettings
-    from agi_wind.providers.protocol import ToolCall, ToolTurn
+    from nagi.agent.settings import AgentSettings
+    from nagi.providers.protocol import ToolCall, ToolTurn
 
     class AgentVoiceProvider(VoiceProvider):
         async def tool_turn(self, model, messages, tools, tool_choice="auto"):
@@ -349,8 +349,8 @@ async def test_voice_turn_can_switch_to_text_after_two_voice_segments(db, actor,
 async def test_stale_queued_speech_is_reported_and_cleaned(db, actor, seeded_scope, archive, chat_request_factory, tmp_path):
     from datetime import datetime, timedelta, timezone
 
-    from agi_wind.archive import models as m
-    from agi_wind.delivery import models as dm
+    from nagi.archive import models as m
+    from nagi.delivery import models as dm
 
     request = chat_request_factory(text="静默测试", conversation_id=seeded_scope.conversation_id)
     accepted = await archive.accept(actor, request)
@@ -385,8 +385,8 @@ async def test_stale_queued_speech_is_reported_and_cleaned(db, actor, seeded_sco
 async def test_pending_speech_is_not_stale_while_a_sibling_segment_is_active(db, actor, seeded_scope, archive, chat_request_factory, tmp_path):
     from datetime import datetime, timedelta, timezone
 
-    from agi_wind.archive import models as m
-    from agi_wind.delivery import models as dm
+    from nagi.archive import models as m
+    from nagi.delivery import models as dm
 
     request = chat_request_factory(text="并发语音测试", conversation_id=seeded_scope.conversation_id)
     accepted = await archive.accept(actor, request)

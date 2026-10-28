@@ -1,6 +1,6 @@
 # 环境核实
 
-2026-10-25。工作目录 C:/path/to/AGI.Wind；原目录不是 Git 仓库。
+2026-10-25。工作目录 C:/path/to/Nagi；原目录不是 Git 仓库。
 
 业务根为 app/；共享协议 packages/contracts/；配置 config/；运行数据 data/，与业务源码分离。tools/、research/、output/live2d/ 原件保留且排除提交。
 

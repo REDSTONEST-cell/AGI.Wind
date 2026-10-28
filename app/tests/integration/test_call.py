@@ -6,8 +6,8 @@ from test_client import client_app, connect
 @pytest.mark.parametrize('realtime,expected', [(True,0.05),(False,0.25)])
 async def test_call_events_are_polled_faster_without_changing_normal_chat(db,actor,seeded_scope,tmp_path,chat_request_factory,monkeypatch,realtime,expected):
     import asyncio
-    import agi_wind.api.app as api_module
-    from agi_wind.archive import models as models
+    import nagi.api.app as api_module
+    from nagi.archive import models as models
     app=client_app(db,actor,tmp_path)
     accepted=await app.state.service.submit(actor,chat_request_factory(conversation_id=seeded_scope.conversation_id,output={'voice':'off','realtime':realtime}))
     delays=[]
@@ -64,7 +64,7 @@ def test_call_websocket_ticket_origin_pcm_and_disconnect_cleanup(db, actor, seed
         upstream = Upstream(); upstreams.append(upstream); return upstream
     monkeypatch.setattr(websockets.asyncio.client, 'connect', connect_upstream)
     (tmp_path/'asr-token.txt').write_text('synthetic-sidecar-only', encoding='utf-8')
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     DeletionLedger(tmp_path/'governance').initialize()
     app = client_app(db, actor, tmp_path)
     with TestClient(app) as client:
@@ -97,9 +97,9 @@ def test_call_websocket_ticket_origin_pcm_and_disconnect_cleanup(db, actor, seed
 
 
 async def test_realtime_chat_uses_incremental_provider_even_when_agent_is_enabled(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.agent.settings import AgentSettings
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.core.types import ModelRef
+    from nagi.agent.settings import AgentSettings
+    from nagi.delivery.service import GenerationService
+    from nagi.core.types import ModelRef
     class StreamingOnly:
         async def tool_turn(self, *args, **kwargs):
             raise AssertionError('Call must not wait for a non-streaming tool-planning turn')
@@ -121,7 +121,7 @@ def test_socket_close_cancels_only_its_call_and_blocks_late_submissions(db, acto
     import json
     from uuid import uuid4
     from fastapi.testclient import TestClient
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     import websockets.asyncio.client
     class Upstream:
         async def __aenter__(self): return self

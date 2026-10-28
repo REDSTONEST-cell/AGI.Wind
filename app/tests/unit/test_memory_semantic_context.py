@@ -1,6 +1,6 @@
 from uuid import uuid4
-from agi_wind.core.types import MemoryHit, SourceRef
-from agi_wind.memory.context import select_memories
+from nagi.core.types import MemoryHit, SourceRef
+from nagi.memory.context import select_memories
 
 
 def test_historical_hits_are_never_injected():

@@ -34,7 +34,7 @@ async def test_review_cancel_during_round_should_prevent_next_paid_call(db, acto
 
 
 async def test_review_global_stop_should_cancel_pending_idle_run(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
     provider = cognition()
     settings = active_settings()
     from pydantic import SecretStr

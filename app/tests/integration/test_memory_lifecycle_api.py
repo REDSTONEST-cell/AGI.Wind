@@ -4,11 +4,11 @@ from test_memory_extraction import FakeExtractor, _completed_turn, _events, _mem
 
 
 async def test_extraction_sets_lifecycle_and_expired_memory_is_not_recalled(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.memory.lifecycle import maintain
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.memory import models as mm
+    from nagi.memory.jobs import run_extraction
+    from nagi.memory.retrieval import MemoryService
+    from nagi.memory.lifecycle import maintain
+    from nagi.jobs.worker import Worker
+    from nagi.memory import models as mm
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory)
     user_event = _events(db, "user")[0]
@@ -46,9 +46,9 @@ async def test_extraction_sets_lifecycle_and_expired_memory_is_not_recalled(db, 
 
 
 async def test_importance_update_sorting_and_recall_debug(db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.jobs import run_extraction
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import run_extraction
+    from nagi.memory.retrieval import MemoryService
+    from nagi.jobs.worker import Worker
 
     await _completed_turn(db, actor, seeded_scope, chat_request_factory, text="我喜欢咖啡")
     coffee = _events(db, "user")[0]

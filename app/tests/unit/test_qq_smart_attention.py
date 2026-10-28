@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agi_wind.core.types import ModelRef
-from agi_wind.integrations.qq_attention import GroupAttention
+from nagi.core.types import ModelRef
+from nagi.integrations.qq_attention import GroupAttention
 from test_qq_attention import message
 
 
@@ -118,7 +118,7 @@ async def test_inflight_result_cannot_rejoin_a_replaced_or_expired_thread():
 
 
 async def test_timeout_and_unsupported_token_limit_fail_closed(monkeypatch):
-    import agi_wind.integrations.qq_attention as module
+    import nagi.integrations.qq_attention as module
     attention = GroupAttention(); attention.mark_replied('room-1', 'member-1'); provider = Classifier()
     provider.config.supported_parameters = []
     assert (await attention.decide_smart(message('下午三点'), provider=provider, model=MODEL)).action == 'observe'
@@ -172,7 +172,7 @@ async def test_corrupt_state_never_resets_paid_budget(tmp_path):
 
 
 def test_atomic_replace_retries_brief_windows_sharing_denials(tmp_path, monkeypatch):
-    import agi_wind.integrations.qq_attention as module
+    import nagi.integrations.qq_attention as module
     original = module.os.replace
     attempts = []
     def transient(*args):

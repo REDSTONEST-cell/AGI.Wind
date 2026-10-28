@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from agi_wind.providers.protocol import ToolTurn, ProviderChunk
+from nagi.providers.protocol import ToolTurn, ProviderChunk
 from test_idle_cognition import cognition, make_service, active_settings, run_turn
 from test_proactive_wake import setup_wake
 

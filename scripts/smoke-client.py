@@ -62,7 +62,7 @@ def main() -> int:
         rows = companions.json() if companions.status_code == 200 else []
         report["companion_count"] = len(rows)
         if not rows:
-            report["error"] = "no companion seeded; run agi-wind init-local"
+            report["error"] = "no companion seeded; run nagi init-local"
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return 1
         companion_id = rows[0]["id"]

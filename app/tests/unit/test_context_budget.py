@@ -2,12 +2,12 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import ChatInput, MemoryHit, ModelRef, SourceRef
+from nagi.core.errors import AppError
+from nagi.core.types import ChatInput, MemoryHit, ModelRef, SourceRef
 
 
 def test_selection_limits_per_source_and_total_budget():
-    from agi_wind.memory.context import select_memories
+    from nagi.memory.context import select_memories
 
     event = uuid4()
     hits = [
@@ -21,7 +21,7 @@ def test_selection_limits_per_source_and_total_budget():
 
 
 def test_current_input_is_never_silently_truncated():
-    from agi_wind.memory.context import check_current_input
+    from nagi.memory.context import check_current_input
 
     with pytest.raises(AppError) as error:
         check_current_input("长" * 12001, token_count=len, budget=12000)
@@ -29,8 +29,8 @@ def test_current_input_is_never_silently_truncated():
 
 
 async def test_long_chinese_persona_fits_configured_budget_and_over_budget_is_explicit(db, actor, seeded_scope):
-    from agi_wind.identity.service import IdentityService
-    from agi_wind.memory.context import ContextBuilder
+    from nagi.identity.service import IdentityService
+    from nagi.memory.context import ContextBuilder
 
     long_description = "她" * 3000  # ~9000 UTF-8 bytes, the shape that produced CONTEXT_TOO_LONG
     await IdentityService(db).update(actor, seeded_scope.companion_id, 1, {"core": {"name": "云浅月", "description": long_description}})

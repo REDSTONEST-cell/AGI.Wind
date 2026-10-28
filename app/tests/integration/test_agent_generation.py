@@ -1,11 +1,11 @@
 import pytest
 from uuid import uuid4
 from sqlalchemy import select
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.providers.protocol import ToolCall, ToolTurn
-from agi_wind.delivery.service import GenerationService
-from agi_wind.core.types import ModelRef
-from agi_wind.archive import models as m
+from nagi.agent.settings import AgentSettings
+from nagi.providers.protocol import ToolCall, ToolTurn
+from nagi.delivery.service import GenerationService
+from nagi.core.types import ModelRef
+from nagi.archive import models as m
 
 
 class ToolProvider:
@@ -22,7 +22,7 @@ class ToolProvider:
 
 
 async def test_agent_calls_real_scoped_memory_and_emits_trace_only_to_logs(db,actor,seeded_scope,chat_request_factory):
-    from agi_wind.archive.service import ArchiveService
+    from nagi.archive.service import ArchiveService
     archive = ArchiveService(db)
     await archive.accept(actor, chat_request_factory('我不吃香菜',conversation_id=seeded_scope.conversation_id))
     # Remove the synthetic pending generation so the next test turn can run normally.
@@ -62,8 +62,8 @@ async def test_agent_sends_one_selected_sticker_transactionally_and_no_legacy_se
     import json
     from io import BytesIO
     from PIL import Image
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.archive.stickers import StickerService
+    from nagi.archive.assets import AssetStore
+    from nagi.archive.stickers import StickerService
     data=BytesIO(); Image.new('RGB',(4,4),'blue').save(data,'PNG')
     asset=await AssetStore(db,tmp_path/'assets').put(actor,BytesIO(data.getvalue()),'image/png')
     sticker=StickerService(db).save_from_asset(actor,seeded_scope.companion_id,asset['id'],name='开心',tags=['开心'])
@@ -89,12 +89,12 @@ async def test_agent_sends_one_selected_sticker_transactionally_and_no_legacy_se
 
 
 async def test_agent_tool_cannot_send_unselected_sticker_or_search_other_scope(db,actor,seeded_scope,tmp_path):
-    from agi_wind.agent.tools import StationTools,StickerSend,MemoryQuery
-    from agi_wind.agent.search import WebSearch
-    from agi_wind.core.types import Actor
-    from agi_wind.archive.service import ArchiveService
-    from agi_wind.core.types import ChatRequest
-    from agi_wind.core.errors import AppError
+    from nagi.agent.tools import StationTools,StickerSend,MemoryQuery
+    from nagi.agent.search import WebSearch
+    from nagi.core.types import Actor
+    from nagi.archive.service import ArchiveService
+    from nagi.core.types import ChatRequest
+    from nagi.core.errors import AppError
     other_actor=Actor(account_id=uuid4(),user_id=uuid4())
     other=db.seed(other_actor)
     await ArchiveService(db).accept(other_actor,ChatRequest(request_id=uuid4(),conversation_id=other.conversation_id,device_id='test',input={'text':'另一个角色的独有私密暗号河豚'}))
@@ -108,7 +108,7 @@ async def test_agent_tool_cannot_send_unselected_sticker_or_search_other_scope(d
 
 async def test_memory_tool_trace_does_not_keep_an_untracked_copy_after_source_deletion(db,actor,seeded_scope,archive,chat_request_factory,tmp_path):
     import json
-    from agi_wind.archive.deletions import DeletionLedger,DeletionService
+    from nagi.archive.deletions import DeletionLedger,DeletionService
     secret='删除测试独有内容河豚'
     await archive.accept(actor,chat_request_factory(secret,conversation_id=seeded_scope.conversation_id))
     source=db.all('events',role='user')[0]

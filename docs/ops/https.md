@@ -11,7 +11,7 @@
 Caddy / Nginx（域名证书）
       │ HTTP 127.0.0.1:18440
       ▼
-AGI.Wind Gateway
+Nagi Gateway
 ```
 
 要点：

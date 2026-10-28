@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from test_idle_cognition import make_service, active_settings, cognition, run_turn
-from agi_wind.integrations.qq import QQSettings
+from nagi.integrations.qq import QQSettings
 
 
 async def test_qq_source_targets_qq_not_an_unrelated_channel(db, actor, seeded_scope, chat_request_factory):
@@ -47,10 +47,10 @@ async def test_qq_binding_changed_before_idle_makes_no_model_call(db, actor, see
 
 
 async def test_group_idle_uses_group_scope_and_same_target(db, actor, seeded_scope, monkeypatch):
-    from agi_wind.integrations.qq_groups import ensure_group_binding
-    from agi_wind.memory.context import ContextBuilder
-    from agi_wind.archive import models as m
-    from agi_wind.core.types import SceneScope
+    from nagi.integrations.qq_groups import ensure_group_binding
+    from nagi.memory.context import ContextBuilder
+    from nagi.archive import models as m
+    from nagi.core.types import SceneScope
     from uuid import uuid4
     clock = [datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)]
     provider = cognition(script=[json.dumps({'action': 'reach_out', 'message': '补充一下'})])
@@ -82,8 +82,8 @@ async def test_group_idle_uses_group_scope_and_same_target(db, actor, seeded_sco
 async def test_proactive_media_is_referenced_in_archive(db, actor, seeded_scope, tmp_path):
     from io import BytesIO
     from PIL import Image
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.archive.service import ArchiveService
+    from nagi.archive.assets import AssetStore
+    from nagi.archive.service import ArchiveService
     image=BytesIO()
     Image.new('RGB',(4,4),'blue').save(image,format='PNG'); image.seek(0)
     asset=await AssetStore(db,tmp_path/'media').put(actor,image,'image/png')

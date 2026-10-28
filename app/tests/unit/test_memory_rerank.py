@@ -10,9 +10,9 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from agi_wind.core.secrets import SecretStore
-from agi_wind.core.types import MemoryHit
-from agi_wind.memory.rerank import (
+from nagi.core.secrets import SecretStore
+from nagi.core.types import MemoryHit
+from nagi.memory.rerank import (
     RERANK_CANDIDATES,
     RERANK_TEXT_CHARS,
     RerankClient,
@@ -25,7 +25,7 @@ SECRET = "synthetic-external-rerank-key"
 
 
 def make_settings(tmp_path, enabled=True, capability="rerank", **overrides):
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = {
         "data_dir": str(tmp_path / "data"),
         "providers": {"rr": {"base_url": "https://vendor.invalid/v1", "credential_ref": "RR_KEY",

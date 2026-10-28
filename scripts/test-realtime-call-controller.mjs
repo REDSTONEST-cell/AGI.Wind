@@ -1,8 +1,8 @@
 import test, {afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
-const core = await readFile(new URL('../app/src/agi_wind/api/client/call-audio.js',import.meta.url),'utf8');
-let code = await readFile(new URL('../app/src/agi_wind/api/client/realtime-call.js',import.meta.url),'utf8');
+const core = await readFile(new URL('../app/src/nagi/api/client/call-audio.js',import.meta.url),'utf8');
+let code = await readFile(new URL('../app/src/nagi/api/client/realtime-call.js',import.meta.url),'utf8');
 code = code.replace("'./call-audio.js?v=20261026-call1'",JSON.stringify('data:text/javascript;base64,'+Buffer.from(core).toString('base64')));
 code = code.replaceAll('import.meta.url', "'http://localhost:18440/client/realtime-call.js'");
 const {createRealtimeCall} = await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));

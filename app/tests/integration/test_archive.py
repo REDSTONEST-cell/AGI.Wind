@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 import pytest
 from sqlalchemy import select, func
-from agi_wind.core.errors import AppError
+from nagi.core.errors import AppError
 
 
 async def test_duplicate_request_reuses_generation(archive, db, actor, seeded_scope, chat_request_factory):
@@ -25,7 +25,7 @@ async def test_concurrent_devices_do_not_duplicate(archive, db, actor, seeded_sc
 
 
 async def test_conflicting_request_and_scope_are_rejected(archive, db, actor, seeded_scope, chat_request_factory):
-    from agi_wind.core.types import Actor
+    from nagi.core.types import Actor
     first = chat_request_factory(conversation_id=seeded_scope.conversation_id)
     await archive.accept(actor, first)
     with pytest.raises(AppError) as error:

@@ -4,8 +4,8 @@ import wave
 import httpx
 import pytest
 
-from agi_wind.core.errors import AppError
-from agi_wind.voice.engine import BreezeVoiceEngine
+from nagi.core.errors import AppError
+from nagi.voice.engine import BreezeVoiceEngine
 
 
 def pcm(seconds=0.2, rate=24000):

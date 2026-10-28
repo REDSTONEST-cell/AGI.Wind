@@ -1,4 +1,4 @@
-from agi_wind.usage import ProcessMonitor, estimate_tokens
+from nagi.usage import ProcessMonitor, estimate_tokens
 
 
 def test_estimate_tokens_counts_chinese_and_latin():

@@ -52,7 +52,7 @@ report_dir=data/"local-smoke"
 report_dir.mkdir(exist_ok=True)
 archive_path=report_dir/"local-roundtrip-source.zip"
 archive_path.write_bytes(package)
-from agi_wind.archive.imports import ImportService
+from nagi.archive.imports import ImportService
 validated=ImportService.validate(archive_path)
 report={"timestamp":datetime.now(timezone.utc).isoformat(),"base_url":base,"live_http":200,"unauthenticated_http":401,"readiness_http":503,"dialogue":"unconfigured_expected","request_idempotent":True,"generation_state":generation["state"],"generation_error":generation["error_code"],"keyword_hits":len(hits),"archive_verified":validated["valid"],"archive_sha256":hashlib.sha256(package).hexdigest(),"records":validated["records"],"real_vendor_or_voice_call":False}
 (report_dir/"report.json").write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding="utf-8")

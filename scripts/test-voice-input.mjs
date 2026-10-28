@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-const { microphoneConstraints, microphoneError } = await import('../app/src/agi_wind/api/client/microphone.js');
-const { createVoiceInput } = await import('../app/src/agi_wind/api/client/voice-input.js');
+const { microphoneConstraints, microphoneError } = await import('../app/src/nagi/api/client/microphone.js');
+const { createVoiceInput } = await import('../app/src/nagi/api/client/voice-input.js');
 const tick = () => new Promise(r=>setImmediate(r));
 
 test('microphone uses explicit system default rather than browser virtual preference',()=>{

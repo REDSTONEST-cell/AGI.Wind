@@ -4,11 +4,11 @@ import json
 import zipfile
 import pytest
 from PIL import Image
-from agi_wind.core.errors import AppError
+from nagi.core.errors import AppError
 
 
 async def image_asset(db, actor, root):
-    from agi_wind.archive.assets import AssetStore
+    from nagi.archive.assets import AssetStore
     stream = BytesIO()
     Image.new('RGB', (4, 4), 'red').save(stream, 'PNG')
     store = AssetStore(db, root)
@@ -16,10 +16,10 @@ async def image_asset(db, actor, root):
 
 
 async def test_sticker_scope_dedup_manual_name_and_archive(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.stickers import StickerService
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
-    from agi_wind.core.types import Actor
+    from nagi.archive.stickers import StickerService
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
+    from nagi.core.types import Actor
     store, asset = await image_asset(db, actor, tmp_path/'assets')
     stickers = StickerService(db)
     first = stickers.save_from_asset(actor, seeded_scope.companion_id, asset['id'], name='红猫')
@@ -38,8 +38,8 @@ async def test_sticker_scope_dedup_manual_name_and_archive(db, actor, seeded_sco
 
 
 async def test_old_v2_archive_without_stickers_is_importable(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
     package = await ExportService(db, tmp_path/'assets').export(actor, seeded_scope.companion_id, tmp_path/'new.zip')
     with zipfile.ZipFile(package) as z:
         files = {name:z.read(name) for name in z.namelist()}
@@ -56,8 +56,8 @@ async def test_old_v2_archive_without_stickers_is_importable(db, actor, seeded_s
 
 
 async def test_deleting_source_removes_captured_sticker_but_preserves_manual_shared_asset(db, actor, seeded_scope, archive, chat_request_factory, tmp_path):
-    from agi_wind.archive.stickers import StickerService
-    from agi_wind.archive.deletions import DeletionService, DeletionLedger
+    from nagi.archive.stickers import StickerService
+    from nagi.archive.deletions import DeletionService, DeletionLedger
     store, asset = await image_asset(db, actor, tmp_path/'assets')
     request = chat_request_factory(conversation_id=seeded_scope.conversation_id)
     request.input.asset_ids = [asset['id']]

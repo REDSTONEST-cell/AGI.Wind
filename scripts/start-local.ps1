@@ -33,13 +33,13 @@ function Start-LocalVoice {
 if (-not (Test-Path -LiteralPath $pythonExe)) { throw 'Run the project dependency setup first; see docs/ops/runbook.md.' }
 & $pythonExe (Join-Path $projectRoot 'scripts\setup-dev-postgres.py')
 if ($LASTEXITCODE -ne 0) { throw 'Project PostgreSQL startup failed.' }
-& $pythonExe -m agi_wind.cli --root $projectRoot init-local
+& $pythonExe -m nagi.cli --root $projectRoot init-local
 if ($LASTEXITCODE -ne 0) { throw 'Local initialization failed.' }
 $pidFile = Join-Path $stateDir 'gateway.pid'
 if (Test-Path -LiteralPath $pidFile) {
     $savedPid = [int](Get-Content -LiteralPath $pidFile -Raw)
     $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid" -ErrorAction SilentlyContinue
-    $owned = $existing -and $existing.CommandLine.Contains('agi_wind.cli') -and $existing.CommandLine.Contains($projectRoot)
+    $owned = $existing -and $existing.CommandLine.Contains('nagi.cli') -and $existing.CommandLine.Contains($projectRoot)
     $existingLive = $false
     if ($owned) {
         for ($probe = 0; $probe -lt 10; $probe++) {
@@ -61,7 +61,7 @@ if (Test-Path -LiteralPath $pidFile) {
         Write-Output "Stale Gateway process $savedPid is not live; stopping the verified project process before restart."
         $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$savedPid" -ErrorAction SilentlyContinue
         foreach ($child in @($children)) {
-            if ($child -and $child.CommandLine -and $child.CommandLine.Contains('agi_wind.cli')) {
+            if ($child -and $child.CommandLine -and $child.CommandLine.Contains('nagi.cli')) {
                 Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
             }
         }
@@ -69,7 +69,7 @@ if (Test-Path -LiteralPath $pidFile) {
         Start-Sleep -Seconds 1
     }
 }
-$argsList = @('-m', 'agi_wind.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$Port", '--host', $BindHost)
+$argsList = @('-m', 'nagi.cli', '--root', ('"' + $projectRoot + '"'), 'serve', '--port', "$Port", '--host', $BindHost)
 $process = Start-Process -FilePath $pythonExe -ArgumentList $argsList -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'gateway.stdout.log') -RedirectStandardError (Join-Path $stateDir 'gateway.stderr.log') -PassThru
 [IO.File]::WriteAllText($pidFile, "$($process.Id)")
 [IO.File]::WriteAllText((Join-Path $stateDir 'gateway-port.txt'), "$Port")

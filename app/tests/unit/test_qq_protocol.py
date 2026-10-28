@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agi_wind.integrations.qq import QQSettings, QQConnection, private_message, request_id_for
+from nagi.integrations.qq import QQSettings, QQConnection, private_message, request_id_for
 
 
 def config(**changes):
@@ -77,15 +77,15 @@ async def test_failed_echo_and_disconnect_never_retry():
 
 
 async def test_image_download_rejects_local_urls_before_network():
-    from agi_wind.integrations.qq import download_image
-    from agi_wind.core.errors import AppError
+    from nagi.integrations.qq import download_image
+    from nagi.core.errors import AppError
     for url in ('file:///C:/private','https://127.0.0.1/a','https://qpic.cn.evil.invalid/a',
                 'http://gchat.qpic.cn:8080/a','https://user:password@gchat.qpic.cn/a'):
         with pytest.raises(AppError): await download_image(url,100)
 
 
 async def test_stop_cancels_busy_job_and_clears_queued_messages():
-    from agi_wind.integrations.qq import QQBridge
+    from nagi.integrations.qq import QQBridge
     from types import SimpleNamespace
     class Service:
         async def interrupt(self,actor,gid,command): self.stopped=gid
@@ -98,7 +98,7 @@ async def test_stop_cancels_busy_job_and_clears_queued_messages():
 
 
 async def test_stop_never_starts_next_queued_job_while_interrupt_awaits():
-    from agi_wind.integrations.qq import QQBridge
+    from nagi.integrations.qq import QQBridge
     from types import SimpleNamespace
     class Service:
         async def interrupt(self,*args): await asyncio.sleep(0.01)
@@ -122,9 +122,9 @@ async def test_stop_never_starts_next_queued_job_while_interrupt_awaits():
 
 
 async def test_scoped_approval_revoke_keeps_other_web_task_pending():
-    from agi_wind.agent.permissions import ApprovalQueue
-    from agi_wind.core.types import Actor
-    from agi_wind.core.errors import AppError
+    from nagi.agent.permissions import ApprovalQueue
+    from nagi.core.types import Actor
+    from nagi.core.errors import AppError
     actor=Actor(account_id=uuid4(),user_id=uuid4())
     queue=ApprovalQueue(); qq_id,web_id=uuid4(),uuid4()
     qq=asyncio.create_task(queue.request(actor,qq_id,'read_file',{}))

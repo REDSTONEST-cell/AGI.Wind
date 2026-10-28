@@ -1,15 +1,15 @@
 import asyncio
 from uuid import uuid4
 import httpx
-from agi_wind.core.settings import Settings
-from agi_wind.core.types import ModelRef
+from nagi.core.settings import Settings
+from nagi.core.types import ModelRef
 
 async def test_running_gateway_worker_completes_synthetic_http_request(db,actor,seeded_scope,tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
     from test_generation import FakeProvider
     provider=FakeProvider()
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     DeletionLedger(tmp_path/"governance").initialize()
     app=create_app(Settings(access_token="synthetic",data_dir=tmp_path),db,actor,GenerationService(db,provider,ModelRef(provider_id="fake",model_id="test")))
     async with app.router.lifespan_context(app):

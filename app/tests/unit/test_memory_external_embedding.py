@@ -7,8 +7,8 @@ import json
 import httpx
 import pytest
 
-from agi_wind.core.secrets import SecretStore
-from agi_wind.memory.external import (
+from nagi.core.secrets import SecretStore
+from nagi.memory.external import (
     DEFAULT_DIMENSION,
     ExternalEmbeddingClient,
     external_embedding_config,
@@ -19,7 +19,7 @@ SECRET = "synthetic-external-embedding-key"
 
 
 def make_settings(tmp_path, **overrides):
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = {
         "data_dir": str(tmp_path / "data"),
         "providers": {"ext": {"base_url": "https://vendor.invalid/v1", "credential_ref": "EXT_KEY",

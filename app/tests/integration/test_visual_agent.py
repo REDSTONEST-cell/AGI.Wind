@@ -3,8 +3,8 @@ from io import BytesIO
 import pytest
 from PIL import Image
 from sqlalchemy import select
-from agi_wind.core.types import ModelRef
-from agi_wind.core.errors import AppError
+from nagi.core.types import ModelRef
+from nagi.core.errors import AppError
 
 
 class VisualProvider:
@@ -13,7 +13,7 @@ class VisualProvider:
         self.plan = plan or {'save':{'name':'红猫','description':'可爱','tags':['猫']},'mimic':True,'send_sticker':None}
 
     async def stream(self, model, messages):
-        from agi_wind.providers.protocol import ProviderChunk
+        from nagi.providers.protocol import ProviderChunk
         self.calls.append(messages)
         if len(self.calls)%2:
             assert self.db.count('stickers') == 0 or len(self.calls)>1
@@ -27,9 +27,9 @@ class VisualProvider:
 
 
 async def setup_turn(db, actor, scope, tmp_path, provider, **kwargs):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.providers.vision import VisionAdapter
-    from agi_wind.delivery.service import GenerationService
+    from nagi.archive.assets import AssetStore
+    from nagi.providers.vision import VisionAdapter
+    from nagi.delivery.service import GenerationService
     store = AssetStore(db, tmp_path/'assets')
     stream=BytesIO(); Image.new('RGB',(3,3),'red').save(stream,'PNG')
     asset=await store.put(actor, BytesIO(stream.getvalue()), 'image/png')
@@ -41,7 +41,7 @@ async def setup_turn(db, actor, scope, tmp_path, provider, **kwargs):
 
 
 async def test_visual_turn_persists_real_order_and_excludes_reasoning_from_context(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.memory.context import ContextBuilder
+    from nagi.memory.context import ContextBuilder
     provider=VisualProvider(db)
     service,asset=await setup_turn(db,actor,seeded_scope,tmp_path,provider)
     request=chat_request_factory(conversation_id=seeded_scope.conversation_id); request.input.asset_ids=[asset['id']]; request.input.text=''
@@ -102,7 +102,7 @@ async def test_vision_failure_is_honest_and_does_not_call_reply(db, actor, seede
 
 
 async def test_failed_reply_marks_tool_failed_preserving_partial_trace(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.providers.protocol import ProviderChunk
+    from nagi.providers.protocol import ProviderChunk
     class FailingReply:
         async def stream(self,model,messages):
             yield ProviderChunk('text','半句')
@@ -118,7 +118,7 @@ async def test_failed_reply_marks_tool_failed_preserving_partial_trace(db, actor
 
 async def test_reflection_timeout_saves_and_never_mimics(db, actor, seeded_scope, chat_request_factory, tmp_path):
     import asyncio
-    from agi_wind.providers.protocol import ProviderChunk
+    from nagi.providers.protocol import ProviderChunk
     class HangingReflect(VisualProvider):
         async def stream(self,model,messages):
             if not self.calls:
@@ -134,7 +134,7 @@ async def test_reflection_timeout_saves_and_never_mimics(db, actor, seeded_scope
 
 
 async def test_reasoning_limit_and_no_save_plan(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.providers.protocol import ProviderChunk
+    from nagi.providers.protocol import ProviderChunk
     class LongReasoning:
         def __init__(self): self.calls=0
         async def stream(self,model,messages):
@@ -153,7 +153,7 @@ async def test_reasoning_limit_and_no_save_plan(db, actor, seeded_scope, chat_re
 
 async def test_cross_service_interrupt_blocks_late_observation(db, actor, seeded_scope, chat_request_factory, tmp_path):
     from uuid import uuid4
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     provider=VisualProvider(db)
     service,asset=await setup_turn(db,actor,seeded_scope,tmp_path,provider)
     request=chat_request_factory(conversation_id=seeded_scope.conversation_id); request.input.asset_ids=[asset['id']]
@@ -170,7 +170,7 @@ async def test_cross_service_interrupt_blocks_late_observation(db, actor, seeded
 
 
 async def test_delete_image_turn_also_deletes_bound_observation_and_media(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.archive.deletions import DeletionService, DeletionLedger
+    from nagi.archive.deletions import DeletionService, DeletionLedger
     provider=VisualProvider(db,plan={'save':None,'mimic':False,'send_sticker':None})
     service,asset=await setup_turn(db,actor,seeded_scope,tmp_path,provider)
     request=chat_request_factory(conversation_id=seeded_scope.conversation_id); request.input.asset_ids=[asset['id']]

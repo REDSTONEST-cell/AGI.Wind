@@ -1,9 +1,9 @@
 from uuid import uuid4
 import pytest
-from agi_wind.core.types import ModelRef
+from nagi.core.types import ModelRef
 
 async def test_interrupt_retry_same_epoch_and_completed_delivery_broadcast(db,actor,seeded_scope,chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
     from test_generation import FakeProvider
     service=GenerationService(db,FakeProvider(),model=ModelRef(provider_id="fake",model_id="test"))
     accepted=await service.submit(actor,chat_request_factory(conversation_id=seeded_scope.conversation_id))
@@ -18,8 +18,8 @@ async def test_interrupt_retry_same_epoch_and_completed_delivery_broadcast(db,ac
     assert other["epoch"]==2
 
 async def test_memory_revision_invalidates_running_generation(db,actor,seeded_scope,chat_request_factory):
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.identity.service import IdentityService
+    from nagi.delivery.service import GenerationService
+    from nagi.identity.service import IdentityService
     class MutatingProvider:
         async def stream(self,model,messages):
             yield "先说半句"

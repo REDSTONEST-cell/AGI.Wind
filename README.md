@@ -1,6 +1,6 @@
-# AGI.Wind 使用说明书
+# Nagi 使用说明书
 
-AGI.Wind 是一个住在你电脑里的 AI 伴侣。
+Nagi 是一个住在你电脑里的 AI 伴侣。
 
 你可以和她聊天、给她发照片、听她说话、和她打电话；也可以把 QQ 接上，让她在你的群聊和私聊里出现。她的记忆、人格和大部分数据都留在你自己的电脑里，不需要把生活交给云端。
 
@@ -144,7 +144,7 @@ AGI.Wind 是一个住在你电脑里的 AI 伴侣。
 
 ## 使用 QQ
 
-QQ 功能需要额外的 OneBot 实现，例如 SnowLuma；AGI.Wind 本身不包含 QQ 客户端。
+QQ 功能需要额外的 OneBot 实现，例如 SnowLuma；Nagi 本身不包含 QQ 客户端。
 
 在设置里填写：
 
@@ -242,7 +242,7 @@ QQ 的登录、掉线和 OneBot 配置由对应的 QQ 客户端负责。
 
 ## 更多说明
 
-- [完整图文说明书](docs/manuals/AGI.Wind-功能与使用说明.html)
+- [完整图文说明书](docs/manuals/Nagi-功能与使用说明.html)
 - [安装与运维](docs/ops/runbook.md)
 - [实时通话说明](docs/ops/realtime-call.md)
 - [第三方许可](docs/ops/licenses.md)

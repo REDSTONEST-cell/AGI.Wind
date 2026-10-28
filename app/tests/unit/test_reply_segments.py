@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from agi_wind.core.types import ChatInput, PersonaSnapshot
-from agi_wind.delivery.segments import ReplySegmenter, split_reply
-from agi_wind.delivery.service import SEGMENTATION_OVERRIDE, GenerationService
+from nagi.core.types import ChatInput, PersonaSnapshot
+from nagi.delivery.segments import ReplySegmenter, split_reply
+from nagi.delivery.service import SEGMENTATION_OVERRIDE, GenerationService
 
 
 def texts(value):

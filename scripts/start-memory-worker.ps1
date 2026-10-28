@@ -6,11 +6,11 @@ $pythonExe = Join-Path $projectRoot 'app\.venv\Scripts\python.exe'
 if (Test-Path -LiteralPath $pidFile) {
     $savedPid = [int](Get-Content -LiteralPath $pidFile -Raw)
     $existing = Get-CimInstance Win32_Process -Filter "ProcessId=$savedPid" -ErrorAction SilentlyContinue
-    if ($existing -and $existing.CommandLine -and $existing.CommandLine.Contains('agi_wind.cli') -and $existing.CommandLine.Contains('memory-worker') -and $existing.CommandLine.Contains($projectRoot)) {
+    if ($existing -and $existing.CommandLine -and $existing.CommandLine.Contains('nagi.cli') -and $existing.CommandLine.Contains('memory-worker') -and $existing.CommandLine.Contains($projectRoot)) {
         Write-Output "Memory worker already running (pid $savedPid)."; return
     }
 }
-$arguments = @('-m','agi_wind.cli','--root',('"' + $projectRoot + '"'),'memory-worker')
+$arguments = @('-m','nagi.cli','--root',('"' + $projectRoot + '"'),'memory-worker')
 $process = Start-Process -FilePath $pythonExe -ArgumentList $arguments -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $stateDir 'memory-worker.stdout.log') -RedirectStandardError (Join-Path $stateDir 'memory-worker.stderr.log') -PassThru
 [IO.File]::WriteAllText($pidFile,[string]$process.Id)
 try { $process.PriorityClass = 'BelowNormal' } catch {}

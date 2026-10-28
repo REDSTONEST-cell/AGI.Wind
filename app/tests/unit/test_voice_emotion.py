@@ -1,4 +1,4 @@
-from agi_wind.voice.emotion import (
+from nagi.voice.emotion import (
     DEFAULT_EMOTION,
     EMOTIONS,
     EmotionTagStream,

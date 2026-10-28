@@ -1,4 +1,4 @@
-from agi_wind.voice.text import clean_for_speech
+from nagi.voice.text import clean_for_speech
 
 
 def test_speech_text_strips_markdown_links_code_and_emoji():

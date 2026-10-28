@@ -2,12 +2,12 @@ from io import BytesIO
 from uuid import uuid4
 import httpx
 from PIL import Image
-from agi_wind.core.settings import Settings
+from nagi.core.settings import Settings
 
 
 async def test_gif_upload_sticker_crud_and_image_only_history(db, actor, seeded_scope, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.core.types import ChatRequest
+    from nagi.api.app import create_app
+    from nagi.core.types import ChatRequest
     app=create_app(Settings(access_token='test-token',data_dir=tmp_path),db,actor)
     data=BytesIO(); Image.new('RGB',(3,4),'blue').save(data,'GIF',save_all=True,append_images=[Image.new('RGB',(3,4),'red')],duration=100,loop=0)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
@@ -32,8 +32,8 @@ async def test_gif_upload_sticker_crud_and_image_only_history(db, actor, seeded_
 
 
 async def test_history_preserves_request_image_order(db, actor, seeded_scope, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.core.types import ChatRequest
+    from nagi.api.app import create_app
+    from nagi.core.types import ChatRequest
     app=create_app(Settings(access_token='token',data_dir=tmp_path),db,actor)
     ids=[]
     for color in ['red','blue']:
@@ -47,7 +47,7 @@ async def test_history_preserves_request_image_order(db, actor, seeded_scope, tm
 
 class FakeVision:
     def __init__(self):
-        from agi_wind.core.types import ModelRef
+        from nagi.core.types import ModelRef
         self.model=ModelRef(provider_id='fake',model_id='vision')
         self.calls=[]
 
@@ -57,9 +57,9 @@ class FakeVision:
 
 
 async def test_manual_sticker_upload_gets_auto_name_and_tags(db, actor, seeded_scope, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.core.types import ModelRef
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.core.types import ModelRef
+    from nagi.delivery.service import GenerationService
     service=GenerationService(db,None,model=ModelRef(provider_id='fake',model_id='text'))
     service.vision=FakeVision()
     app=create_app(Settings(access_token='token',data_dir=tmp_path),db,actor,generation_service=service)

@@ -4,18 +4,18 @@ import httpx
 from sqlalchemy import select
 from test_client import client_app
 
-from agi_wind.archive import models as m
-from agi_wind.archive.service import ArchiveService
-from agi_wind.core.settings import Settings
-from agi_wind.core.types import SceneScope
-from agi_wind.integrations.qq_groups import ensure_group_binding, ensure_principal
-from agi_wind.jobs.worker import Worker
-from agi_wind.memory import models as mm
-from agi_wind.memory.extraction import ExtractedCandidate, ExtractedSourceRef
-from agi_wind.memory.jobs import (MEMBER_EXTRACT, _load_batch, _load_member_batch,
+from nagi.archive import models as m
+from nagi.archive.service import ArchiveService
+from nagi.core.settings import Settings
+from nagi.core.types import SceneScope
+from nagi.integrations.qq_groups import ensure_group_binding, ensure_principal
+from nagi.jobs.worker import Worker
+from nagi.memory import models as mm
+from nagi.memory.extraction import ExtractedCandidate, ExtractedSourceRef
+from nagi.memory.jobs import (MEMBER_EXTRACT, _load_batch, _load_member_batch,
                                   enqueue_member_extraction, run_member_extraction)
-from agi_wind.memory.members import MemberMemoryWriter
-from agi_wind.memory.retrieval import MemoryService
+from nagi.memory.members import MemberMemoryWriter
+from nagi.memory.retrieval import MemoryService
 
 BOT = "10002"
 OWNER = "10001"

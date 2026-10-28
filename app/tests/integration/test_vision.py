@@ -3,11 +3,11 @@ import base64
 import httpx
 import pytest
 from PIL import Image
-from agi_wind.core.types import ModelRef
+from nagi.core.types import ModelRef
 
 async def test_image_payload_and_observation_are_archived(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.providers.vision import VisionAdapter
+    from nagi.archive.assets import AssetStore
+    from nagi.providers.vision import VisionAdapter
     stream = BytesIO()
     Image.new("RGB", (3, 3), "blue").save(stream, "PNG")
     raw = stream.getvalue()
@@ -25,8 +25,8 @@ async def test_image_payload_and_observation_are_archived(db, actor, seeded_scop
     assert db.all("events")[0]["kind"] == "vision_observation"
 
 async def test_vision_timeout_never_fabricates_description(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.providers.vision import VisionAdapter
+    from nagi.archive.assets import AssetStore
+    from nagi.providers.vision import VisionAdapter
     async def timeout(model, messages): raise httpx.ReadTimeout("private")
     adapter = VisionAdapter(db, AssetStore(db, tmp_path), timeout, ModelRef(provider_id="fake",model_id="test"))
     with pytest.raises(Exception): await adapter.observe(seeded_scope, [], "看图")

@@ -2,7 +2,7 @@
 from alembic import op
 import sqlalchemy as sa
 
-from agi_wind.archive import models as m
+from nagi.archive import models as m
 
 revision = '0014_qq_channels'
 down_revision = '0013_memory_projection_compat'

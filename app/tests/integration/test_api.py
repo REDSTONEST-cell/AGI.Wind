@@ -1,11 +1,11 @@
 from uuid import uuid4
 import httpx
-from agi_wind.core.settings import Settings
-from agi_wind.core.types import ModelRef
+from nagi.core.settings import Settings
+from nagi.core.types import ModelRef
 
 async def test_auth_validation_ready_and_durable_accept(db,actor,seeded_scope,tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
     from test_generation import FakeProvider
     service=GenerationService(db,FakeProvider(),model=ModelRef(provider_id="fake",model_id="test"))
     settings=Settings(access_token="synthetic-access-token",data_dir=tmp_path)
@@ -27,7 +27,7 @@ async def test_auth_validation_ready_and_durable_accept(db,actor,seeded_scope,tm
         assert invalid.status_code==422 and "synthetic-access-token" not in invalid.text
 
 async def test_unconfigured_model_is_explicit_not_fake_success(db,actor,seeded_scope,tmp_path):
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
     app=create_app(Settings(access_token="test",data_dir=tmp_path),db=db,actor=actor)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test") as client:
         ready=await client.get("/health/ready")
@@ -36,13 +36,13 @@ async def test_unconfigured_model_is_explicit_not_fake_success(db,actor,seeded_s
 
 
 async def test_browser_home_opens_even_when_models_are_unconfigured(db,actor,seeded_scope,tmp_path):
-    from agi_wind.api.app import create_app
+    from nagi.api.app import create_app
     app=create_app(Settings(access_token="synthetic-private-token",data_dir=tmp_path),db=db,actor=actor)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url="http://test") as client:
         home=await client.get("/")
         assert home.status_code==200
         assert home.headers["content-type"].startswith("text/html")
-        assert "AGI.Wind" in home.text
+        assert "Nagi" in home.text
         assert "synthetic-private-token" not in home.text
         # The dependency status page moved to /status and must still render while models are unconfigured.
         status=await client.get("/status")

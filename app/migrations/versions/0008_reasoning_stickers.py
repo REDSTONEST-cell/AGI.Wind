@@ -1,5 +1,5 @@
 from alembic import op
-from agi_wind.archive.models import stickers
+from nagi.archive.models import stickers
 
 revision = '0008_reasoning_stickers'
 down_revision = '0007_conversation_lifecycle'

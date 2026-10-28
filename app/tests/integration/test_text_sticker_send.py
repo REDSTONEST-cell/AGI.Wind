@@ -3,8 +3,8 @@ from io import BytesIO
 
 from PIL import Image
 
-from agi_wind.core.types import ModelRef
-from agi_wind.providers.protocol import ProviderChunk
+from nagi.core.types import ModelRef
+from nagi.providers.protocol import ProviderChunk
 
 
 class HiddenTagStickerProvider:
@@ -31,8 +31,8 @@ class PlainProvider:
 
 
 async def seed_sticker(db, actor, seeded_scope, tmp_path, *, name='小猫', tags=('猫', '可爱')):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.archive.stickers import StickerService
+    from nagi.archive.assets import AssetStore
+    from nagi.archive.stickers import StickerService
 
     store = AssetStore(db, tmp_path / 'assets')
     image = BytesIO()
@@ -45,7 +45,7 @@ async def seed_sticker(db, actor, seeded_scope, tmp_path, *, name='小猫', tags
 
 
 async def test_text_turn_sends_sticker_from_hidden_directive(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
 
     asset, sticker = await seed_sticker(db, actor, seeded_scope, tmp_path)
     provider = HiddenTagStickerProvider('[表情包:小猫]')
@@ -71,7 +71,7 @@ async def test_text_turn_sends_sticker_from_hidden_directive(db, actor, seeded_s
 
 
 async def test_text_turn_does_not_send_sticker_when_not_asked(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
 
     await seed_sticker(db, actor, seeded_scope, tmp_path)
     provider = PlainProvider()
@@ -84,7 +84,7 @@ async def test_text_turn_does_not_send_sticker_when_not_asked(db, actor, seeded_
 
 
 async def test_directive_without_sticker_library_does_not_send(db, actor, seeded_scope, chat_request_factory, tmp_path):
-    from agi_wind.delivery.service import GenerationService
+    from nagi.delivery.service import GenerationService
 
     provider = HiddenTagStickerProvider('[表情包:猫]')
     service = GenerationService(db, provider, model=ModelRef(provider_id='fake', model_id='synthetic'), random_value=lambda: 0)

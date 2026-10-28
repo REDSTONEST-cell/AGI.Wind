@@ -1,7 +1,7 @@
 """Structured memory authority and rebuildable semantic/operational storage."""
 from alembic import op
 import sqlalchemy as sa
-from agi_wind.memory.models import MEMORY_DERIVED_TABLES
+from nagi.memory.models import MEMORY_DERIVED_TABLES
 
 revision = '0012_memory_completion'
 down_revision = '0011_proactive'

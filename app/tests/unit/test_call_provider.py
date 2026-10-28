@@ -1,8 +1,8 @@
 import json
 import httpx
-from agi_wind.core.settings import ProviderSettings
-from agi_wind.core.types import ModelRef
-from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+from nagi.core.settings import ProviderSettings
+from nagi.core.types import ModelRef
+from nagi.providers.openai_compatible import OpenAICompatibleProvider
 
 
 async def test_call_disables_thinking_only_for_known_official_deepseek():

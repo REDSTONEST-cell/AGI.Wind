@@ -5,11 +5,11 @@ from uuid import uuid4
 import pytest
 from pydantic import Field, ValidationError
 
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.agent.runner import AgentRunner, ToolSpec
-from agi_wind.providers.protocol import ToolCall, ToolTurn
-from agi_wind.core.types import DTO, ModelRef
-from agi_wind.core.errors import AppError
+from nagi.agent.settings import AgentSettings
+from nagi.agent.runner import AgentRunner, ToolSpec
+from nagi.providers.protocol import ToolCall, ToolTurn
+from nagi.core.types import DTO, ModelRef
+from nagi.core.errors import AppError
 
 
 class Query(DTO):

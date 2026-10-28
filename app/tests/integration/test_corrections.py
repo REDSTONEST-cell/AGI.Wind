@@ -1,11 +1,11 @@
 import pytest
 
 async def test_correction_preserves_original_and_invalidates_projection(db, archive, actor, seeded_scope, chat_request_factory):
-    from agi_wind.memory.corrections import CorrectionService
-    from agi_wind.memory.retrieval import MemoryService
-    from agi_wind.archive import models as m
-    from agi_wind.memory import models as mm
-    from agi_wind.archive.repository import digest
+    from nagi.memory.corrections import CorrectionService
+    from nagi.memory.retrieval import MemoryService
+    from nagi.archive import models as m
+    from nagi.memory import models as mm
+    from nagi.archive.repository import digest
     from uuid import uuid4
     await archive.accept(actor, chat_request_factory(text="以前喜欢咖啡", conversation_id=seeded_scope.conversation_id))
     event = db.all("events")[0]

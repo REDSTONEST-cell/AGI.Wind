@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.memory.autobiography import (
+from nagi.memory.autobiography import (
     AUTOBIOGRAPHY_EPISTEMIC_TYPE,
     AUTOBIOGRAPHY_KIND,
     AUTOBIOGRAPHY_SUMMARY_LEVEL,

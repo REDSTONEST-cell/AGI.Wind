@@ -1,5 +1,5 @@
 [project]
-name = "agi-wind"
+name = "nagi"
 version = "0.1.0"
 description = "Portable authoritative companion archive and gateway"
 requires-python = ">=3.12,<3.13"
@@ -20,7 +20,7 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest==8.4.2", "pytest-asyncio==1.2.0", "jsonschema==4.25.1"]
 [project.scripts]
-agi-wind = "agi_wind.cli:main"
+nagi = "nagi.cli:main"
 [build-system]
 requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
@@ -29,4 +29,4 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = ["live: requires explicitly configured remote provider", "gpu: requires target GPU"]
 [tool.hatch.build.targets.wheel]
-packages = ["src/agi_wind"]
+packages = ["src/nagi"]

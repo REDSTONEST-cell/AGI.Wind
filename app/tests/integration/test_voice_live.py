@@ -11,11 +11,11 @@ pytestmark = [
 
 
 async def test_real_breeze_voice_reply(db, actor, seeded_scope, chat_request_factory, tmp_path, monkeypatch):
-    from agi_wind.api.app import from_env
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.voice.engine import BreezeVoiceEngine
-    from agi_wind.voice.service import VoiceService
+    from nagi.api.app import from_env
+    from nagi.archive.assets import AssetStore
+    from nagi.delivery.service import GenerationService
+    from nagi.voice.engine import BreezeVoiceEngine
+    from nagi.voice.service import VoiceService
 
     root = Path(__file__).resolve().parents[3]
     monkeypatch.setenv("AGI_CONFIG", str(root / "config/app.local.yaml"))

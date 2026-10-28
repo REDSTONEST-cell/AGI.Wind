@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 import httpx
 from sqlalchemy import select
-from agi_wind.archive import models as m
+from nagi.archive import models as m
 
 
 def test_claim_filter_and_automatic_job_coalescing(db, seeded_scope):
-    from agi_wind.memory.jobs import enqueue_extraction
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.jobs import enqueue_extraction
+    from nagi.jobs.worker import Worker
     with db.engine.begin() as conn:
         assert enqueue_extraction(conn,seeded_scope,uuid4()) is not None
         assert enqueue_extraction(conn,seeded_scope,uuid4()) is None
@@ -23,9 +23,9 @@ def test_claim_filter_and_automatic_job_coalescing(db, seeded_scope):
 
 
 async def test_exhausted_budget_defers_without_burning_retry_attempts(db, seeded_scope):
-    from agi_wind.jobs.worker import Worker
-    from agi_wind.core.errors import AppError
-    from agi_wind.memory.jobs import enqueue_extraction
+    from nagi.jobs.worker import Worker
+    from nagi.core.errors import AppError
+    from nagi.memory.jobs import enqueue_extraction
     with db.engine.begin() as conn:
         enqueue_extraction(conn,seeded_scope,uuid4())
         conn.execute(m.outbox.update().where(m.outbox.c.event_type=='memory.extract').values(available_at=m.now()))
@@ -42,9 +42,9 @@ async def test_exhausted_budget_defers_without_burning_retry_attempts(db, seeded
 
 
 async def test_memory_settings_validate_atomically_and_show_worker_budget(db, actor, seeded_scope, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.core.settings import Settings
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.core.settings import Settings
+    from nagi.delivery.service import GenerationService
     settings = Settings(data_dir=tmp_path,access_token='synthetic-memory-token')
     app = create_app(settings,db,actor,GenerationService(db,None,model=None))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test',
@@ -63,10 +63,10 @@ async def test_memory_settings_validate_atomically_and_show_worker_budget(db, ac
 
 
 async def test_pin_unpin_and_ttl_only_patches_reach_memory_policy(db, actor, seeded_scope, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.core.settings import Settings
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.memory import models as mm
+    from nagi.api.app import create_app
+    from nagi.core.settings import Settings
+    from nagi.delivery.service import GenerationService
+    from nagi.memory import models as mm
     with db.engine.begin() as conn:
         mid=conn.execute(mm.memory_items.insert().values(account_id=actor.account_id,
             companion_id=seeded_scope.companion_id,user_id=actor.user_id,kind='fact',content='合成固定验证',

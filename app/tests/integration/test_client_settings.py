@@ -24,7 +24,7 @@ async def test_provider_settings_require_credential_and_mask_the_key(db,actor,se
         assert listed["providers"][0]["id"]=="openai" and listed["providers"][0]["credential_configured"] is True
         settings_file=json.loads((tmp_path/"settings.json").read_text(encoding="utf-8"))
         assert "sk-synthetic-secret" not in json.dumps(settings_file)
-        assert settings_file["providers"]["openai"]["credential_ref"].startswith("AGI_WIND_PROVIDER_")
+        assert settings_file["providers"]["openai"]["credential_ref"].startswith("NAGI_PROVIDER_")
         secrets_file=json.loads((tmp_path/"secrets.json").read_text(encoding="utf-8"))
         assert secrets_file["values"][settings_file["providers"]["openai"]["credential_ref"]]=="sk-synthetic-secret"
 
@@ -111,7 +111,7 @@ async def test_memory_settings_can_be_read_updated_and_persisted(db,actor,seeded
         stored=json.loads((tmp_path/"settings.json").read_text(encoding="utf-8"))
         assert stored["memory"]["memory_extraction_enabled"] is False
         assert stored["memory"]["memory_extract_batch_events"]==4
-        from agi_wind.core.settings import Settings,apply_persisted_settings
+        from nagi.core.settings import Settings,apply_persisted_settings
         reloaded=apply_persisted_settings(Settings(data_dir=tmp_path),tmp_path)
         assert reloaded.memory_extraction_enabled is False
         assert reloaded.memory_extract_batch_events==4

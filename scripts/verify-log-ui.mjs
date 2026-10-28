@@ -20,12 +20,12 @@ const evaluate = async (expression) => {
 const until = async (expression, tries = 120) => { for (let i = 0; i < tries; i++) { try { if (await evaluate(expression)) return; } catch {} await sleep(100); } throw Error('condition failed: ' + expression); };
 
 const lines = [
-  '21:00:01 INFO [agi_wind.delivery] generation 12345678 running provider=deepseek model=deepseek-flash',
-  '21:00:02 INFO [agi_wind] http POST /api/v1/chat/requests -> 202 70ms',
-  '21:00:03 INFO [agi_wind.voice] voice synthesized voice_id=yuwan seconds=5.20 total_ms=3800 rtf=0.73 first_audio_ms=400',
-  '21:00:04 INFO [agi_wind.memory] memory extracted companion=abcdef events=8 candidates=4 stored=1 reinforced=0 quarantined=0 ignored=0 calls=1',
-  '21:00:05 ERROR [agi_wind.delivery] generation 12345678 failed code=GENERATION_FAILED',
-  '21:00:06 INFO [agi_wind] startup complete',
+  '21:00:01 INFO [nagi.delivery] generation 12345678 running provider=deepseek model=deepseek-flash',
+  '21:00:02 INFO [nagi] http POST /api/v1/chat/requests -> 202 70ms',
+  '21:00:03 INFO [nagi.voice] voice synthesized voice_id=yuwan seconds=5.20 total_ms=3800 rtf=0.73 first_audio_ms=400',
+  '21:00:04 INFO [nagi.memory] memory extracted companion=abcdef events=8 candidates=4 stored=1 reinforced=0 quarantined=0 ignored=0 calls=1',
+  '21:00:05 ERROR [nagi.delivery] generation 12345678 failed code=GENERATION_FAILED',
+  '21:00:06 INFO [nagi] startup complete',
 ];
 const mock = `(() => {
   const original = window.fetch.bind(window);

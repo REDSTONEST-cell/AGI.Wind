@@ -3,14 +3,14 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.core.settings import ProactiveSettings, Settings
-from agi_wind.core.types import ModelRef
-from agi_wind.delivery.idle_cognition import IdleCognitionService
-from agi_wind.delivery.proactive import ProactiveService
-from agi_wind.delivery.service import GenerationService
-from agi_wind.delivery.models import idle_cognition_runs
-from agi_wind.archive import models as m
+from nagi.agent.settings import AgentSettings
+from nagi.core.settings import ProactiveSettings, Settings
+from nagi.core.types import ModelRef
+from nagi.delivery.idle_cognition import IdleCognitionService
+from nagi.delivery.proactive import ProactiveService
+from nagi.delivery.service import GenerationService
+from nagi.delivery.models import idle_cognition_runs
+from nagi.archive import models as m
 
 UTC = timezone.utc
 

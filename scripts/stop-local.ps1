@@ -35,11 +35,11 @@ if (Test-Path -LiteralPath $gatewayPidFile) {
         $gatewayProcess = Get-Process -Id $savedGatewayPid -ErrorAction SilentlyContinue
         if ($gatewayProcess -and -not $gatewayProcess.WaitForExit(15000)) {
             $verified = Get-CimInstance Win32_Process -Filter "ProcessId=$savedGatewayPid" -ErrorAction SilentlyContinue
-            if ($verified -and $verified.CommandLine -and $verified.CommandLine.Contains('agi_wind.cli') -and $verified.CommandLine.Contains($projectRoot)) {
+            if ($verified -and $verified.CommandLine -and $verified.CommandLine.Contains('nagi.cli') -and $verified.CommandLine.Contains($projectRoot)) {
                 Write-Output "Gateway did not exit within 15s; forcing the verified project process (pid $savedGatewayPid)."
                 $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$savedGatewayPid" -ErrorAction SilentlyContinue
                 foreach ($child in @($children)) {
-                    if ($child -and $child.CommandLine -and $child.CommandLine.Contains('agi_wind.cli')) {
+                    if ($child -and $child.CommandLine -and $child.CommandLine.Contains('nagi.cli')) {
                         Stop-Process -Id $child.ProcessId -Force -ErrorAction SilentlyContinue
                     }
                 }

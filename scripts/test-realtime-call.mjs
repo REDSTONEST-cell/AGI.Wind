@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
-const source = await readFile(new URL('../app/src/agi_wind/api/client/call-audio.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../app/src/nagi/api/client/call-audio.js', import.meta.url), 'utf8');
 const { SpeechChunks, PcmDecoder, PcmPlayer } = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
 
 test('speech chunks start at a clause and flush without losing text', () => {
@@ -22,7 +22,7 @@ test('short complete replies start immediately and an early comma does not block
 });
 
 test('microphone sends 40ms frames instead of waiting for 80ms', async () => {
-  const source = await readFile(new URL('../app/src/agi_wind/api/client/call-capture.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../app/src/nagi/api/client/call-capture.js', import.meta.url), 'utf8');
   const frames=[]; let Processor;
   class Base { constructor(){this.port={postMessage:buffer=>frames.push(buffer)};} }
   vm.runInNewContext(source, {AudioWorkletProcessor:Base,Float32Array,registerProcessor:(name,value)=>{Processor=value;}});

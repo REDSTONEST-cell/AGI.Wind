@@ -9,11 +9,11 @@ import json
 import httpx
 import pytest
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.core.secrets import SecretStore
-from agi_wind.memory import models as mm
-from agi_wind.memory.retrieval import MemoryService
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.core.secrets import SecretStore
+from nagi.memory import models as mm
+from nagi.memory.retrieval import MemoryService
 
 SECRET = "synthetic-external-memory-key"
 
@@ -39,7 +39,7 @@ def fact(db, scope, text, **kw):
 
 
 def external_settings(tmp_path, enabled=True, *, with_secret=True):
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     data_dir = tmp_path / "data"
     if with_secret:
         SecretStore(data_dir).set("EXT_KEY", SECRET)
@@ -57,7 +57,7 @@ class FakeExternalEncoder:
     """One-hot synthetic vectors, same shape as the local-model fake in test_memory_semantic."""
 
     def __init__(self):
-        from agi_wind.memory.embedding import EmbeddingSpace
+        from nagi.memory.embedding import EmbeddingSpace
         self.space = EmbeddingSpace(model_name="synthetic-external", revision="test",
             weights_hash="c" * 64, tokenizer_hash="d" * 64, dimension=512)
         self.calls = []
@@ -95,7 +95,7 @@ def hit_ids(hits):
 
 
 async def test_external_embedding_indexes_and_retrieves_without_local_deployment(db, seeded_scope, external):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
     fact(db, seeded_scope, "我喜欢海浪")
     await MemoryService(db).index_events(seeded_scope)
@@ -113,7 +113,7 @@ async def test_external_embedding_indexes_and_retrieves_without_local_deployment
 
 
 async def test_external_embedding_failures_fall_back_to_keyword(db, seeded_scope, external):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
 
     async def unavailable(*args, **kwargs):
@@ -129,7 +129,7 @@ async def test_external_embedding_failures_fall_back_to_keyword(db, seeded_scope
 
 
 async def test_external_embedding_dimension_mismatch_falls_back(db, seeded_scope, external):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
 
     async def wrong_dimension(texts, query=False):
@@ -142,8 +142,8 @@ async def test_external_embedding_dimension_mismatch_falls_back(db, seeded_scope
 
 
 async def test_unconfigured_external_embedding_keeps_keyword_only_behavior(db, seeded_scope, tmp_path):
-    from agi_wind.core.settings import Settings
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.core.settings import Settings
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
     db.memory_settings = Settings(data_dir=tmp_path / "empty" / "data",
                                   access_token="synthetic-memory-token")
@@ -154,7 +154,7 @@ async def test_unconfigured_external_embedding_keeps_keyword_only_behavior(db, s
 
 
 async def test_semantic_master_switch_disables_external_embedding(db, seeded_scope, external):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
     external.memory_settings.memory_semantic_enabled = False
     assert semantic_status(db) == "keyword_only"
@@ -197,8 +197,8 @@ async def test_rerank_timeout_keeps_baseline_order_and_breaker(db, seeded_scope,
 
 
 async def test_memory_settings_api_masks_secret_and_toggles_external_features(db, actor, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
     settings = external_settings(tmp_path)
     app = create_app(settings, db, actor, GenerationService(db, None, model=None))
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test",
@@ -228,9 +228,9 @@ async def test_memory_settings_api_masks_secret_and_toggles_external_features(db
 
 
 async def test_provider_probe_routes_gate_capability_and_credential(db, actor, tmp_path):
-    from agi_wind.api.app import create_app
-    from agi_wind.delivery.service import GenerationService
-    from agi_wind.core.settings import Settings
+    from nagi.api.app import create_app
+    from nagi.delivery.service import GenerationService
+    from nagi.core.settings import Settings
     settings = Settings.model_validate({
         "data_dir": str(tmp_path / "probe-data"),
         "access_token": "synthetic-memory-token",

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from agi_wind.api.browser import BrowserSessions
+from nagi.api.browser import BrowserSessions
 
 
 def test_browser_sessions_survive_restart(tmp_path: Path):

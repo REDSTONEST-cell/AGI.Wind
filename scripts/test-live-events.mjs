@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-const source=await readFile(new URL('../app/src/agi_wind/api/client/live-events.js',import.meta.url));
+const source=await readFile(new URL('../app/src/nagi/api/client/live-events.js',import.meta.url));
 const { LiveCursors, idleCompletion }=await import('data:text/javascript;base64,'+source.toString('base64'));
 
 test('initial snapshot skips old events and reconnect never rewinds',()=>{

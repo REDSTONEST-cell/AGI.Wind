@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agi_wind.memory import frameworks
-from agi_wind.memory.frameworks import (
+from nagi.memory import frameworks
+from nagi.memory.frameworks import (
     FRAMEWORK_SETTINGS_ATTRIBUTES,
     FrameworkStatus,
     MemoryFrameworkConfig,
@@ -192,7 +192,7 @@ def test_importing_frameworks_pulls_in_no_framework_library():
     """A fresh interpreter importing the module must not drag in Letta/EverOS."""
     code = (
         "import sys\n"
-        "import agi_wind.memory.frameworks as fw\n"
+        "import nagi.memory.frameworks as fw\n"
         "roots = {name.split('.')[0] for name in sys.modules}\n"
         "assert not ({'letta', 'everos', 'letta_client'} & roots), roots\n"
         "assert fw.MemoryFrameworkConfig().enabled is False\n"

@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 async def main():
-    from agi_wind.memory.semantic import LocalClient, pack_vector, rank_vectors
+    from nagi.memory.semantic import LocalClient, pack_vector, rank_vectors
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", action="store_true")
     args = parser.parse_args()

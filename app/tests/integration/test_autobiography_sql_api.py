@@ -12,13 +12,13 @@ import httpx
 import pytest
 from sqlalchemy import func, select
 
-from agi_wind.api.app import create_app
-from agi_wind.archive import models as m
-from agi_wind.core.errors import AppError
-from agi_wind.core.settings import Settings, apply_persisted_settings, persist_settings
-from agi_wind.core.types import Actor
-from agi_wind.memory import models as mm
-from agi_wind.memory.autobiography import AutobiographyOrganizer, MemoryEntry, SqlAutobiographyWriter
+from nagi.api.app import create_app
+from nagi.archive import models as m
+from nagi.core.errors import AppError
+from nagi.core.settings import Settings, apply_persisted_settings, persist_settings
+from nagi.core.types import Actor
+from nagi.memory import models as mm
+from nagi.memory.autobiography import AutobiographyOrganizer, MemoryEntry, SqlAutobiographyWriter
 
 AUTH = {"Authorization": "Bearer synthetic-autobiography"}
 

@@ -4,13 +4,13 @@ import pytest
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.core.settings import ProactiveSettings, Settings
-from agi_wind.core.types import ModelRef
-from agi_wind.delivery import models as dm
-from agi_wind.delivery.proactive import ProactiveService, in_quiet_hours
-from agi_wind.delivery.service import GenerationService
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.core.settings import ProactiveSettings, Settings
+from nagi.core.types import ModelRef
+from nagi.delivery import models as dm
+from nagi.delivery.proactive import ProactiveService, in_quiet_hours
+from nagi.delivery.service import GenerationService
 from test_client import client_app, connect
 
 

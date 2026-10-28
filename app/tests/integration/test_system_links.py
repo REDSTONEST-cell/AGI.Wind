@@ -7,8 +7,8 @@ import httpx
 import pytest
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.integrations.qq_groups import ensure_group_binding
+from nagi.archive import models as m
+from nagi.integrations.qq_groups import ensure_group_binding
 from test_client import client_app
 from test_idle_cognition import make_service, active_settings, cognition, run_turn
 
@@ -24,7 +24,7 @@ async def test_realtime_http_rejects_unbound_call_instead_of_crashing(db, actor,
 
 
 def test_background_memory_visits_private_and_each_enabled_group(db, actor, seeded_scope):
-    from agi_wind.memory.runtime import _scopes
+    from nagi.memory.runtime import _scopes
     one=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='123456789')
     two=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='223456789')
     scopes=_scopes(db,actor)
@@ -72,9 +72,9 @@ async def test_global_stop_cancels_long_idle_proactive_request(db, actor, seeded
 
 
 def test_owner_summary_sources_exclude_group_members_and_anonymous(db, actor, seeded_scope):
-    from agi_wind.memory.consolidation import _rows
-    from agi_wind.integrations.qq_groups import ensure_principal
-    from agi_wind.archive.service import ArchiveService
+    from nagi.memory.consolidation import _rows
+    from nagi.integrations.qq_groups import ensure_principal
+    from nagi.archive.service import ArchiveService
     binding=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='123456789')
     principal=ensure_principal(db,actor,external_user_id='999999999',nickname='synthetic',is_owner=False)
     archive=ArchiveService(db)
@@ -87,8 +87,8 @@ def test_owner_summary_sources_exclude_group_members_and_anonymous(db, actor, se
 
 async def test_observed_owner_group_message_schedules_owner_not_member_extraction(db, actor, seeded_scope, tmp_path):
     from types import SimpleNamespace
-    from agi_wind.integrations.qq import QQSettings
-    from agi_wind.integrations.qq_groups import group_message
+    from nagi.integrations.qq import QQSettings
+    from nagi.integrations.qq_groups import group_message
     from test_qq_groups import group_event, BOT, OWNER, GROUP
     app=client_app(db,actor,tmp_path)
     app.state.settings.qq=QQSettings(enabled=True,owner_qq=OWNER,bot_qq=BOT,
@@ -103,7 +103,7 @@ async def test_observed_owner_group_message_schedules_owner_not_member_extractio
 @pytest.mark.parametrize('source_device',['qq-private:10002:10001','web'])
 async def test_regular_proactive_uses_the_same_qq_target_as_after_reply(db, actor, seeded_scope, chat_request_factory, source_device):
     from types import SimpleNamespace
-    from agi_wind.integrations.qq import QQSettings
+    from nagi.integrations.qq import QQSettings
     clock=[datetime(2026,10,27,4,0,tzinfo=timezone.utc)]
     provider=cognition(reply='[情绪:平静]\nsynthetic message')
     settings=active_settings()
@@ -124,7 +124,7 @@ async def test_regular_proactive_uses_the_same_qq_target_as_after_reply(db, acto
 
 async def test_offline_qq_does_not_block_web_proactive_message(db, actor, seeded_scope):
     from types import SimpleNamespace
-    from agi_wind.integrations.qq import QQSettings
+    from nagi.integrations.qq import QQSettings
     settings=active_settings()
     settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',conversation_id=seeded_scope.conversation_id)
     service,proactive,_=make_service(db,cognition(),settings,[m.now()])
@@ -158,8 +158,8 @@ async def test_stop_cancels_only_proactive_send_and_keeps_tick_alive(db, actor, 
 async def test_idle_media_obeys_live_sticker_send_permission(db, actor, seeded_scope, monkeypatch):
     from types import SimpleNamespace
     from uuid import uuid4
-    from agi_wind.agent.settings import AgentSettings
-    from agi_wind.archive.stickers import StickerService
+    from nagi.agent.settings import AgentSettings
+    from nagi.archive.stickers import StickerService
     provider=cognition()
     service,_,idle=make_service(db,provider,active_settings(),[m.now()])
     service.agent_settings=lambda:AgentSettings(enabled=True,sticker_send_enabled=False)
@@ -176,11 +176,11 @@ async def test_chat_to_idle_tools_to_qq_sticker_archive_and_logs(db, actor, seed
     from types import SimpleNamespace
     from io import BytesIO
     from PIL import Image
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.archive.stickers import StickerService
-    from agi_wind.agent.settings import AgentSettings
-    from agi_wind.integrations.qq import QQBridge,QQSettings
-    from agi_wind.providers.protocol import ToolCall,ToolTurn
+    from nagi.archive.assets import AssetStore
+    from nagi.archive.stickers import StickerService
+    from nagi.agent.settings import AgentSettings
+    from nagi.integrations.qq import QQBridge,QQSettings
+    from nagi.providers.protocol import ToolCall,ToolTurn
     assets=AssetStore(db,tmp_path/'assets')
     data=BytesIO(); Image.new('RGB',(3,3),'blue').save(data,format='PNG'); data.seek(0)
     asset=await assets.put(actor,data,'image/png')

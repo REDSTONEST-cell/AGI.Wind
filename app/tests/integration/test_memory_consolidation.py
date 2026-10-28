@@ -1,15 +1,15 @@
 from datetime import timedelta
 from uuid import uuid4
 from sqlalchemy import select
-from agi_wind.archive import models as m
-from agi_wind.memory import models as mm
-from agi_wind.archive.repository import digest
+from nagi.archive import models as m
+from nagi.memory import models as mm
+from nagi.archive.repository import digest
 
 
 async def test_summary_is_derived_source_backed_and_idempotent(db, seeded_scope):
-    from agi_wind.memory.consolidation import enqueue_consolidation, run_consolidation
-    from agi_wind.memory.extraction import ExtractedCandidate, ExtractedSourceRef
-    from agi_wind.jobs.worker import Worker
+    from nagi.memory.consolidation import enqueue_consolidation, run_consolidation
+    from nagi.memory.extraction import ExtractedCandidate, ExtractedSourceRef
+    from nagi.jobs.worker import Worker
     scope = seeded_scope
     text = '今天完成了合成测试计划'
     with db.engine.begin() as conn:
@@ -34,7 +34,7 @@ async def test_summary_is_derived_source_backed_and_idempotent(db, seeded_scope)
 
 
 async def test_hidden_fact_sources_are_not_offered_for_new_summaries(db, seeded_scope):
-    from agi_wind.memory.consolidation import enqueue_consolidation
+    from nagi.memory.consolidation import enqueue_consolidation
     scope = seeded_scope
     with db.engine.begin() as conn:
         eid = conn.execute(m.events.insert().values(account_id=scope.account_id,companion_id=scope.companion_id,

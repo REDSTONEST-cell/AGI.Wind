@@ -5,8 +5,8 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from agi_wind.integrations import qq as qq_module
-from agi_wind.integrations.qq import QQBridge, QQSettings, private_message
+from nagi.integrations import qq as qq_module
+from nagi.integrations.qq import QQBridge, QQSettings, private_message
 
 
 def qq_settings(**overrides):

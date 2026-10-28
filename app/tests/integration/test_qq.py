@@ -21,7 +21,7 @@ async def test_qq_settings_auth_validation_masking_and_persistence(db,actor,seed
         assert response.json()['reply_min_gap_seconds']==2.0
         assert payload['token'] not in response.text
         assert payload['token'] not in (tmp_path/'settings.json').read_text(encoding='utf-8')
-        from agi_wind.core.settings import Settings,apply_persisted_settings
+        from nagi.core.settings import Settings,apply_persisted_settings
         restored=apply_persisted_settings(Settings(data_dir=tmp_path))
         assert restored.qq.owner_qq=='10001'
         assert restored.qq.debounce_enabled is False
@@ -31,7 +31,7 @@ async def test_qq_settings_auth_validation_masking_and_persistence(db,actor,seed
 
 def test_qq_ws_rejects_disabled_and_wrong_credentials(db,actor,tmp_path):
     app=client_app(db,actor,tmp_path)
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.deletions import DeletionLedger
     DeletionLedger(tmp_path/'governance').initialize()
     with TestClient(app) as c:
         with pytest.raises(WebSocketDisconnect):
@@ -39,9 +39,9 @@ def test_qq_ws_rejects_disabled_and_wrong_credentials(db,actor,tmp_path):
 
 
 def test_qq_real_websocket_roundtrip_uses_archive_segments_and_deduplicates(db,actor,seeded_scope,tmp_path):
-    from agi_wind.archive.deletions import DeletionLedger
-    from agi_wind.integrations.qq import QQSettings,TOKEN_REF
-    from agi_wind.providers.protocol import ProviderChunk
+    from nagi.archive.deletions import DeletionLedger
+    from nagi.integrations.qq import QQSettings,TOKEN_REF
+    from nagi.providers.protocol import ProviderChunk
     class Provider:
         calls=0
         async def stream(self,*args):
@@ -82,7 +82,7 @@ def test_qq_real_websocket_roundtrip_uses_archive_segments_and_deduplicates(db,a
 
 async def test_qq_concurrent_connections_cannot_both_be_admitted(db,actor,seeded_scope,tmp_path):
     import asyncio
-    from agi_wind.integrations.qq import QQSettings,TOKEN_REF,WS_PATH
+    from nagi.integrations.qq import QQSettings,TOKEN_REF,WS_PATH
     app=client_app(db,actor,tmp_path)
     app.state.settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',conversation_id=seeded_scope.conversation_id)
     token='synthetic-qq-token-32-characters-long'; app.state.settings_store.set(TOKEN_REF,token)

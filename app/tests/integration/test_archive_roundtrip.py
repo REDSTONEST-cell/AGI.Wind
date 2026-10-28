@@ -5,13 +5,13 @@ from pathlib import Path
 from uuid import uuid4
 import pytest
 from PIL import Image
-from agi_wind.core.errors import AppError
+from nagi.core.errors import AppError
 
 async def test_roundtrip_preserves_identity_events_media_and_sources(db, actor, seeded_scope, archive, chat_request_factory, tmp_path):
-    from agi_wind.archive.assets import AssetStore
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
-    from agi_wind.archive.deletions import DeletionLedger
+    from nagi.archive.assets import AssetStore
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
+    from nagi.archive.deletions import DeletionLedger
     stream=BytesIO()
     Image.new("RGB",(2,2),"red").save(stream,"PNG")
     store=AssetStore(db,tmp_path/"assets")
@@ -27,7 +27,7 @@ async def test_roundtrip_preserves_identity_events_media_and_sources(db, actor, 
     from sqlalchemy import create_engine,text
     from alembic import command
     from alembic.config import Config
-    from agi_wind.archive.repository import Database
+    from nagi.archive.repository import Database
     schema="restore_"+uuid4().hex
     with db.engine.begin() as conn: conn.execute(text(f'CREATE SCHEMA "{schema}"'))
     target_engine=create_engine(db.engine.url,connect_args={"options":"-csearch_path="+schema},hide_parameters=True)
@@ -51,7 +51,7 @@ async def test_roundtrip_preserves_identity_events_media_and_sources(db, actor, 
         with db.engine.begin() as conn: conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
 
 def test_archive_rejects_traversal_symlinks_and_hash_tampering(tmp_path):
-    from agi_wind.archive.imports import ImportService
+    from nagi.archive.imports import ImportService
     for name in ("../escape.txt", "C:/escape.txt", "assets\\escape.txt"):
         path=tmp_path/(str(uuid4())+".zip")
         with zipfile.ZipFile(path,"w") as z:
@@ -60,8 +60,8 @@ def test_archive_rejects_traversal_symlinks_and_hash_tampering(tmp_path):
         with pytest.raises(AppError): ImportService.validate(path)
 
 async def test_restore_without_latest_ledger_is_quarantined(db, actor, seeded_scope, tmp_path):
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
     package=await ExportService(db,tmp_path/"assets").export(actor,seeded_scope.companion_id,tmp_path/"copy.zip")
     result=await ImportService(db,tmp_path/"assets").restore(package,mode="clone")
     assert result["status"]=="recovery_quarantine"

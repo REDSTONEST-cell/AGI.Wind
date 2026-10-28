@@ -6,7 +6,7 @@ from test_client import client_app, connect
 async def test_stop_cancels_pending_generation_and_revokes_approval(db, actor, seeded_scope, tmp_path, chat_request_factory):
     import asyncio
     import pytest
-    from agi_wind.core.errors import AppError
+    from nagi.core.errors import AppError
     app = client_app(db, actor, tmp_path)
     service = app.state.service
     accepted = await service.submit(actor, chat_request_factory(conversation_id=seeded_scope.conversation_id))
@@ -42,7 +42,7 @@ async def test_approval_api_auth_csrf_and_single_use(db, actor, seeded_scope, tm
 
 
 async def test_admin_request_is_local_explicit_and_not_an_agent_tool(db, actor, seeded_scope, tmp_path, monkeypatch):
-    import agi_wind.agent.api as api
+    import nagi.agent.api as api
     app = client_app(db, actor, tmp_path)
     monkeypatch.setattr(api, 'is_administrator', lambda: False)
     calls = []
@@ -58,8 +58,8 @@ async def test_admin_request_is_local_explicit_and_not_an_agent_tool(db, actor, 
 
 
 async def test_deepseek_model_key_is_reused_without_exposing_or_copying_it(db, actor, seeded_scope, tmp_path):
-    from agi_wind.core.settings import ProviderSettings
-    from agi_wind.core.secrets import SecretStore
+    from nagi.core.settings import ProviderSettings
+    from nagi.core.secrets import SecretStore
     app = client_app(db, actor, tmp_path)
     app.state.settings.providers['deepseek'] = ProviderSettings(base_url='https://api.deepseek.com', credential_ref='MODEL_DS_TEST')
     store = SecretStore(tmp_path)
@@ -70,8 +70,8 @@ async def test_deepseek_model_key_is_reused_without_exposing_or_copying_it(db, a
     assert response.json()['search_key_inherited'] and response.json()['search_ready']
     assert 'synthetic-model-deepseek-key' not in response.text
     assert 'synthetic-model-deepseek-key' not in (tmp_path / 'settings.json').read_text(encoding='utf-8')
-    assert app.state.service.agent_secret_store.get('AGI_WIND_AGENT_SEARCH_DEEPSEEK') == 'synthetic-model-deepseek-key'
-    assert store.get('AGI_WIND_AGENT_SEARCH_DEEPSEEK') is None
+    assert app.state.service.agent_secret_store.get('NAGI_AGENT_SEARCH_DEEPSEEK') == 'synthetic-model-deepseek-key'
+    assert store.get('NAGI_AGENT_SEARCH_DEEPSEEK') is None
 
 
 async def test_command_settings_are_validated_and_visible(db, actor, seeded_scope, tmp_path):
@@ -97,7 +97,7 @@ async def test_command_settings_are_validated_and_visible(db, actor, seeded_scop
 
 
 async def test_agent_settings_auth_partial_update_mask_and_restart(db,actor,seeded_scope,tmp_path):
-    from agi_wind.core.settings import Settings, apply_persisted_settings
+    from nagi.core.settings import Settings, apply_persisted_settings
     app=client_app(db,actor,tmp_path)
     bearer={'Authorization':'Bearer synthetic-private-token'}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
@@ -135,7 +135,7 @@ async def test_agent_settings_cookie_write_requires_same_origin_csrf(db,actor,se
 async def test_concurrent_disjoint_agent_patches_both_survive(db,actor,seeded_scope,tmp_path,monkeypatch):
     import asyncio
     import threading
-    import agi_wind.agent.api as api
+    import nagi.agent.api as api
     app=client_app(db,actor,tmp_path)
     bearer={'Authorization':'Bearer synthetic-private-token'}
     first_entered,release=threading.Event(),threading.Event()

@@ -1,12 +1,12 @@
 import json
 import httpx
 import pytest
-from agi_wind.core.settings import ProviderSettings
-from agi_wind.core.types import ModelRef
+from nagi.core.settings import ProviderSettings
+from nagi.core.types import ModelRef
 
 
 async def test_memory_completion_is_bounded_and_reports_real_tokens():
-    from agi_wind.providers.openai_compatible import OpenAICompatibleProvider
+    from nagi.providers.openai_compatible import OpenAICompatibleProvider
     bodies = []
     def handler(request):
         bodies.append(json.loads(request.content))
@@ -25,8 +25,8 @@ async def test_memory_completion_is_bounded_and_reports_real_tokens():
 
 
 async def test_metered_extractor_counts_repairs_even_when_schema_stays_invalid():
-    from agi_wind.memory.metering import MeteredExtractor
-    from agi_wind.core.errors import AppError
+    from nagi.memory.metering import MeteredExtractor
+    from nagi.core.errors import AppError
     class Fake:
         async def complete_memory(self, model, messages, **kwargs):
             return {'text':'invalid', 'usage':{'prompt_tokens':10,'completion_tokens':2,'usage_estimated':False}}

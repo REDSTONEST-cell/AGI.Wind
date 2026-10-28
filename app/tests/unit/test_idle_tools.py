@@ -1,17 +1,17 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from agi_wind.agent.settings import AgentSettings
-from agi_wind.providers.protocol import ToolTurn, ToolCall
+from nagi.agent.settings import AgentSettings
+from nagi.providers.protocol import ToolTurn, ToolCall
 
 
 async def test_idle_tools_are_readonly_bounded_and_never_register_local_tools(monkeypatch):
-    from agi_wind.delivery.idle_tools import IdleToolSession
-    from agi_wind.agent.runner import ToolSpec
-    from agi_wind.agent.tools import MemoryQuery
+    from nagi.delivery.idle_tools import IdleToolSession
+    from nagi.agent.runner import ToolSpec
+    from nagi.agent.tools import MemoryQuery
     calls, traces = [], []
     async def execute(args): calls.append(args.query); return {'items': []}
-    monkeypatch.setattr('agi_wind.delivery.idle_tools.StationTools.specs', lambda self: [
+    monkeypatch.setattr('nagi.delivery.idle_tools.StationTools.specs', lambda self: [
         ToolSpec('search_memory', 'memory', MemoryQuery, execute),
         ToolSpec('run_command', 'forbidden', MemoryQuery, execute)])
     service = SimpleNamespace(db=None, agent_settings=lambda: AgentSettings(enabled=True), agent_secret_store=None)
@@ -31,12 +31,12 @@ async def test_idle_tools_are_readonly_bounded_and_never_register_local_tools(mo
 
 
 async def test_final_turn_disables_tool_execution_and_caps_only_supported_parameters(monkeypatch):
-    from agi_wind.delivery.idle_tools import IdleToolSession
-    from agi_wind.agent.runner import ToolSpec
-    from agi_wind.agent.tools import MemoryQuery
-    from agi_wind.core.types import ModelRef
+    from nagi.delivery.idle_tools import IdleToolSession
+    from nagi.agent.runner import ToolSpec
+    from nagi.agent.tools import MemoryQuery
+    from nagi.core.types import ModelRef
     async def execute(args): raise AssertionError('final turn must not run tools')
-    monkeypatch.setattr('agi_wind.delivery.idle_tools.StationTools.specs', lambda self: [
+    monkeypatch.setattr('nagi.delivery.idle_tools.StationTools.specs', lambda self: [
         ToolSpec('search_memory', 'memory', MemoryQuery, execute)])
     service = SimpleNamespace(db=None, agent_settings=lambda: AgentSettings(enabled=True), agent_secret_store=None)
     async def noop(*args): pass
@@ -53,8 +53,8 @@ async def test_final_turn_disables_tool_execution_and_caps_only_supported_parame
 
 
 async def test_plain_provider_falls_back_without_unsupported_token_parameter():
-    from agi_wind.delivery.idle_tools import IdleToolSession
-    from agi_wind.core.types import ModelRef
+    from nagi.delivery.idle_tools import IdleToolSession
+    from nagi.core.types import ModelRef
     async def noop(*args): pass
     service = SimpleNamespace(db=None, agent_settings=lambda: AgentSettings(enabled=False), agent_secret_store=None)
     class Provider:
@@ -67,14 +67,14 @@ async def test_plain_provider_falls_back_without_unsupported_token_parameter():
 
 
 async def test_unknown_and_denied_tools_get_matching_errors_without_execution(monkeypatch):
-    from agi_wind.delivery.idle_tools import IdleToolSession
-    from agi_wind.agent.runner import ToolSpec
-    from agi_wind.agent.tools import MemoryQuery
-    from agi_wind.core.errors import AppError
+    from nagi.delivery.idle_tools import IdleToolSession
+    from nagi.agent.runner import ToolSpec
+    from nagi.agent.tools import MemoryQuery
+    from nagi.core.errors import AppError
     import json
     async def execute(args): raise AssertionError('denied tool must not execute')
     async def deny(args): raise AppError('TOOL_NOT_ALLOWED', 'denied', 403)
-    monkeypatch.setattr('agi_wind.delivery.idle_tools.StationTools.specs', lambda self: [
+    monkeypatch.setattr('nagi.delivery.idle_tools.StationTools.specs', lambda self: [
         ToolSpec('search_memory', 'memory', MemoryQuery, execute, deny)])
     service = SimpleNamespace(db=None, agent_settings=lambda: AgentSettings(enabled=True), agent_secret_store=None)
     async def noop(*args): pass
@@ -92,7 +92,7 @@ async def test_unknown_and_denied_tools_get_matching_errors_without_execution(mo
 
 
 async def test_session_accepts_three_call_policy_and_missing_agent_settings():
-    from agi_wind.delivery.idle_tools import IdleToolSession
+    from nagi.delivery.idle_tools import IdleToolSession
     async def noop(*args): pass
     session = IdleToolSession(SimpleNamespace(db=None), SimpleNamespace(), noop, noop, max_calls=3)
     assert session.max_calls == 3

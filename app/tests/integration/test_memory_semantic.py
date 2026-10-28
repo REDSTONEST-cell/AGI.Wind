@@ -10,11 +10,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.memory import models as mm
-from agi_wind.memory.lifecycle import now_utc
-from agi_wind.memory.retrieval import MemoryService
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.memory import models as mm
+from nagi.memory.lifecycle import now_utc
+from nagi.memory.retrieval import MemoryService
 
 
 def source(db, scope, text):
@@ -39,7 +39,7 @@ def fact(db, scope, text, **kw):
 
 class FakeEncoder:
     def __init__(self):
-        from agi_wind.memory.embedding import EmbeddingSpace
+        from nagi.memory.embedding import EmbeddingSpace
         self.space = EmbeddingSpace(model_name="synthetic-zh", revision="test", weights_hash="a"*64,
             tokenizer_hash="b"*64, dimension=512)
         self.calls = []
@@ -66,7 +66,7 @@ def encoder(db, tmp_path):
 
 
 async def test_paraphrase_and_fingerprint_isolation(db, seeded_scope, encoder):
-    from agi_wind.memory.semantic import index_semantic, semantic_status
+    from nagi.memory.semantic import index_semantic, semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
     fact(db, seeded_scope, "我喜欢海浪")
     await MemoryService(db).index_events(seeded_scope)
@@ -86,7 +86,7 @@ async def test_paraphrase_and_fingerprint_isolation(db, seeded_scope, encoder):
 
 
 async def test_unavailable_disabled_and_unconfigured_fall_back(db, seeded_scope, encoder):
-    from agi_wind.memory.semantic import semantic_status
+    from nagi.memory.semantic import semantic_status
     coffee, _ = fact(db, seeded_scope, "我喜欢咖啡")
     db.memory_settings.memory_semantic_enabled = False
     assert any(h.memory_id == coffee for h in await MemoryService(db).search(seeded_scope, "咖啡"))
@@ -121,7 +121,7 @@ async def test_incremental_index_is_bounded_skips_empty_and_replaces_edited(db, 
 
 @pytest.mark.parametrize("change", ["hidden", "disputed", "superseded", "expired", "visibility", "source_edit", "valid_to", "fictional"])
 async def test_inactive_sources_and_shared_summary_never_resurrect(db, seeded_scope, encoder, change):
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.memory.semantic import index_semantic
     mid, eid = fact(db, seeded_scope, "我喜欢咖啡")
     with db.engine.begin() as conn:
         summary = conn.execute(mm.memory_items.insert().values(account_id=seeded_scope.account_id,
@@ -147,7 +147,7 @@ async def test_inactive_sources_and_shared_summary_never_resurrect(db, seeded_sc
 
 
 async def test_index_rechecks_sources_and_revision_after_model_work(db, seeded_scope, encoder):
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.memory.semantic import index_semantic
     mid, eid = fact(db, seeded_scope, "我喜欢咖啡")
     def change():
         with db.engine.begin() as conn:
@@ -169,8 +169,8 @@ async def test_pins_are_included_and_expiry_preserved_on_importance_edit(db, act
 
 
 async def test_foreign_user_and_companion_vectors_and_fk_delete(db, actor, seeded_scope, encoder):
-    from agi_wind.core.types import Actor
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.core.types import Actor
+    from nagi.memory.semantic import index_semantic
     other = db.seed(Actor(account_id=actor.account_id, user_id=uuid4()))
     foreign, _ = fact(db, other, "我喜欢咖啡")
     local, _ = fact(db, seeded_scope, "我喜欢咖啡")
@@ -205,7 +205,7 @@ def test_detail_exposes_scoped_relation_history(db, actor, seeded_scope):
 
 
 async def test_chunk_vector_fk_delete_and_changed_content_reindex(db, seeded_scope, encoder):
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.memory.semantic import index_semantic
     mid, _ = fact(db,seeded_scope,"我喜欢咖啡")
     service = MemoryService(db)
     await service.index_events(seeded_scope)
@@ -220,7 +220,7 @@ async def test_chunk_vector_fk_delete_and_changed_content_reindex(db, seeded_sco
 
 
 async def test_memory_source_changes_during_encode_are_discarded(db,seeded_scope,encoder):
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.memory.semantic import index_semantic
     _, eid = fact(db,seeded_scope,"我喜欢咖啡")
     def change():
         with db.engine.begin() as conn:
@@ -232,7 +232,7 @@ async def test_memory_source_changes_during_encode_are_discarded(db,seeded_scope
 
 
 async def test_ineligible_old_fact_cannot_starve_incremental_index(db,seeded_scope,encoder):
-    from agi_wind.memory.semantic import index_semantic
+    from nagi.memory.semantic import index_semantic
     _, old_source = fact(db,seeded_scope,"我喜欢海浪")
     current,_ = fact(db,seeded_scope,"我喜欢咖啡")
     with db.engine.begin() as conn:
@@ -243,7 +243,7 @@ async def test_ineligible_old_fact_cannot_starve_incremental_index(db,seeded_sco
 
 
 async def test_semantic_candidate_loading_keeps_gateway_event_loop_responsive(db,seeded_scope,encoder,monkeypatch):
-    from agi_wind.memory import semantic
+    from nagi.memory import semantic
     fact(db,seeded_scope,"我喜欢咖啡")
     await semantic.index_semantic(db,seeded_scope)
     original = semantic.verified_refs
@@ -263,7 +263,7 @@ async def test_semantic_candidate_loading_keeps_gateway_event_loop_responsive(db
 
 
 async def test_ann_warm_cache_does_not_reload_full_projection_and_rechecks_hidden_source(db, seeded_scope, encoder, monkeypatch):
-    from agi_wind.memory import semantic
+    from nagi.memory import semantic
     mid, eid = fact(db, seeded_scope, "我喜欢咖啡")
     await semantic.index_semantic(db, seeded_scope)
     assert mid in (await semantic.semantic_candidates(db, seeded_scope, "提神饮料"))[0]
@@ -283,7 +283,7 @@ async def test_ann_warm_cache_does_not_reload_full_projection_and_rechecks_hidde
 
 
 async def test_ann_backend_failure_falls_back_to_keyword(db, seeded_scope, encoder, monkeypatch):
-    from agi_wind.memory import semantic
+    from nagi.memory import semantic
     mid, _ = fact(db, seeded_scope, "我喜欢咖啡")
     await semantic.index_semantic(db, seeded_scope)
     def broken(*args, **kwargs):

@@ -3,9 +3,9 @@ from uuid import uuid4
 
 import pytest
 
-from agi_wind.core.errors import AppError
-from agi_wind.core.types import ModelRef
-from agi_wind.memory.extraction import Extractor
+from nagi.core.errors import AppError
+from nagi.core.types import ModelRef
+from nagi.memory.extraction import Extractor
 
 
 def result_json(event_id):

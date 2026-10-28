@@ -1,5 +1,5 @@
 import httpx
-from agi_wind.delivery.stream import emit_live
+from nagi.delivery.stream import emit_live
 from test_client import client_app
 
 
@@ -15,7 +15,7 @@ async def test_live_cursor_is_authorized_readonly_snapshot(db,actor,seeded_scope
         with db.engine.begin() as conn:
             emit_live(conn,seeded_scope.conversation_id,'idle_cognition.started',{})
         assert (await client.get(path)).json()=={'sequence':2}
-        from agi_wind.core.types import Actor
+        from nagi.core.types import Actor
         from uuid import uuid4
         other=db.seed(Actor(account_id=uuid4(),user_id=uuid4()))
         denied=await client.get(f'/api/v1/conversations/{other.conversation_id}/live-cursor')

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from agi_wind.memory.lifecycle import (
+from nagi.memory.lifecycle import (
     decay_score,
     extend_after_access,
     freshness,

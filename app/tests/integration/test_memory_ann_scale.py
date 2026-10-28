@@ -1,10 +1,10 @@
 """Synthetic projection only; no production text or encoder calls."""
 from uuid import UUID, uuid4
 
-from agi_wind.archive import models as m
-from agi_wind.archive.repository import digest
-from agi_wind.memory import models as mm
-from agi_wind.memory import semantic
+from nagi.archive import models as m
+from nagi.archive.repository import digest
+from nagi.memory import models as mm
+from nagi.memory import semantic
 
 
 def test_full_projection_above_old_cap_and_source_delete_recheck(db, seeded_scope):

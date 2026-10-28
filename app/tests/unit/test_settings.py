@@ -12,7 +12,7 @@ def config():
 
 
 def test_unknown_model_role_is_rejected():
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = config()
     value["models"]["secret_role"] = value["models"]["dialogue"]
     with pytest.raises(ValidationError):
@@ -20,7 +20,7 @@ def test_unknown_model_role_is_rejected():
 
 
 def test_unsupported_parameter_is_actionable():
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = config()
     value["models"]["dialogue"]["parameters"]["reasoning_effort"] = "high"
     with pytest.raises(ValidationError, match="unsupported parameter"):
@@ -28,7 +28,7 @@ def test_unsupported_parameter_is_actionable():
 
 
 def test_secrets_never_appear_in_dump_repr_or_error():
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = config()
     value["access_token"] = "synthetic-private-token"
     value["database_url"] = "postgresql+psycopg://user:synthetic-password@127.0.0.1/test"
@@ -42,7 +42,7 @@ def test_secrets_never_appear_in_dump_repr_or_error():
 
 
 def test_credential_reference_not_value_is_loaded(tmp_path, monkeypatch):
-    from agi_wind.core.settings import load_settings
+    from nagi.core.settings import load_settings
     import yaml
     monkeypatch.setenv("VENDOR_KEY", "synthetic-key")
     path = tmp_path / "app.yaml"
@@ -53,7 +53,7 @@ def test_credential_reference_not_value_is_loaded(tmp_path, monkeypatch):
 
 
 def test_unknown_provider_and_unsafe_runtime_fallback_are_rejected():
-    from agi_wind.core.settings import Settings
+    from nagi.core.settings import Settings
     value = config()
     value["models"]["dialogue"]["provider_id"] = "missing"
     with pytest.raises(ValidationError, match="unknown provider"):

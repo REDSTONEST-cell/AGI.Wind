@@ -3,9 +3,9 @@ from uuid import uuid4
 
 from sqlalchemy import select
 
-from agi_wind.archive import models as m
-from agi_wind.memory.jobs import enqueue_extraction, enqueue_manual_extraction
-from agi_wind.jobs.worker import Worker
+from nagi.archive import models as m
+from nagi.memory.jobs import enqueue_extraction, enqueue_manual_extraction
+from nagi.jobs.worker import Worker
 
 
 def test_auto_extraction_waits_for_idle_and_eighth_turn_runs_now(db, seeded_scope):
@@ -53,8 +53,8 @@ def test_manual_and_budget_deferral_are_not_delayed_or_bypassed(db, seeded_scope
 
 def test_member_replies_are_also_batched(db, actor, seeded_scope):
     from test_memory_members import setup_room
-    from agi_wind.core.types import SceneScope
-    from agi_wind.memory.jobs import enqueue_member_extraction, MEMBER_EXTRACT
+    from nagi.core.types import SceneScope
+    from nagi.memory.jobs import enqueue_member_extraction, MEMBER_EXTRACT
     binding, *_ = setup_room(db, actor, seeded_scope)
     scope = SceneScope(account_id=actor.account_id, user_id=actor.user_id,
         companion_id=seeded_scope.companion_id, conversation_id=binding['conversation_id'],

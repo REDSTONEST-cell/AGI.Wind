@@ -3,10 +3,10 @@ from sqlalchemy import select
 import pytest
 
 async def test_latest_ledger_prevents_old_backup_and_clone_resurrection(db,actor,seeded_scope,archive,chat_request_factory,tmp_path):
-    from agi_wind.archive.exports import ExportService
-    from agi_wind.archive.imports import ImportService
-    from agi_wind.archive.deletions import DeletionLedger, DeletionService
-    from agi_wind.memory.retrieval import MemoryService
+    from nagi.archive.exports import ExportService
+    from nagi.archive.imports import ImportService
+    from nagi.archive.deletions import DeletionLedger, DeletionService
+    from nagi.memory.retrieval import MemoryService
     await archive.accept(actor,chat_request_factory(text="待永久删除的合成经历",conversation_id=seeded_scope.conversation_id))
     event=db.all("events")[0]
     await MemoryService(db).index_events(seeded_scope)
@@ -24,10 +24,10 @@ async def test_latest_ledger_prevents_old_backup_and_clone_resurrection(db,actor
     assert ledger.load()[0]["target_ids"]==[str(event["id"])]
 
 async def test_delete_conversation_removes_events_requests_and_conversation(db,actor,seeded_scope,archive,chat_request_factory,tmp_path):
-    from agi_wind.archive.deletions import DeletionLedger, DeletionService
-    from agi_wind.core.errors import AppError
-    from agi_wind.memory import models as mm
-    from agi_wind.memory.retrieval import MemoryService
+    from nagi.archive.deletions import DeletionLedger, DeletionService
+    from nagi.core.errors import AppError
+    from nagi.memory import models as mm
+    from nagi.memory.retrieval import MemoryService
     from sqlalchemy import text
     await archive.accept(actor,chat_request_factory(text="待整段删除的合成对话",conversation_id=seeded_scope.conversation_id))
     event=db.all("events")[0]
@@ -55,8 +55,8 @@ async def test_delete_conversation_removes_events_requests_and_conversation(db,a
     assert ledger.load()[0]["target_ids"]
 
 def test_ledger_detects_truncation_and_hash_chain_corruption(tmp_path):
-    from agi_wind.archive.deletions import DeletionLedger
-    from agi_wind.core.errors import AppError
+    from nagi.archive.deletions import DeletionLedger
+    from nagi.core.errors import AppError
     from uuid import uuid4
     ledger=DeletionLedger(tmp_path)
     ledger.append({"account_id":str(uuid4()),"companion_id":str(uuid4()),"target_type":"event","target_ids":[str(uuid4())]})

@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from PIL import Image
 
-from agi_wind.ambient.observer import (
+from nagi.ambient.observer import (
     AmbientObserver,
     format_observations,
     image_signature,
@@ -12,7 +12,7 @@ from agi_wind.ambient.observer import (
     normalize_process_name,
     signature_distance,
 )
-from agi_wind.ambient.settings import AmbientSettings
+from nagi.ambient.settings import AmbientSettings
 
 
 def test_normalize_process_name_keeps_only_executable_name():
@@ -69,8 +69,8 @@ def test_ambient_settings_validate_bounds_and_clean_exclusions():
 
 
 async def test_observer_queries_are_scoped_and_prompt_block_redacts_sensitive_rows(db, actor, tmp_path):
-    from agi_wind.core.settings import Settings
-    from agi_wind.ambient.models import ambient_observations
+    from nagi.core.settings import Settings
+    from nagi.ambient.models import ambient_observations
 
     settings = Settings(
         access_token="ambient-test",
