@@ -30,6 +30,14 @@ async def test_proposals_cannot_overwrite_core_or_cross_account(db, actor, seede
     assert error.value.status == 403
 
 
+async def test_persona_patch_rejects_removed_relationship_dates(db, actor, seeded_scope):
+    from agi_wind.identity.service import IdentityService
+    identity = IdentityService(db)
+    with pytest.raises(AppError) as error:
+        await identity.update(actor, seeded_scope.companion_id, 1, {"relationship": {"first_met_at": "2026-01-01"}})
+    assert error.value.code == "INVALID_PATCH"
+
+
 async def test_relationship_and_commitments_shared_across_conversations(db, actor, seeded_scope):
     from agi_wind.identity.service import IdentityService
     from agi_wind.identity.models import relationships, commitments

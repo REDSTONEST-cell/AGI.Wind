@@ -24,6 +24,7 @@ from ..core.errors import AppError
 from ..core.types import Actor, ChatInput, DTO, ModelRef, Scope, SceneScope
 from ..memory.context import ContextBuilder
 from . import models as dm
+from .output_guard import time_context, VisibleTextGuard, public_text
 from .proactive import in_quiet_hours, countable_message
 from .stream import emit_live
 
@@ -52,7 +53,8 @@ def _clean_message(value: str, limit=400) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^\s*\[情绪:[^\]]*\]\s*", "", text)
     text = re.sub(r"^\s*\[表情包(?::[^\]]*)?\]\s*", "", text, flags=re.MULTILINE)
-    return text.strip()[:limit]
+    guard = VisibleTextGuard()
+    return (guard.feed(text) + guard.flush()).strip()[:limit]
 
 
 class IdleCognitionService:
@@ -444,6 +446,7 @@ class IdleCognitionService:
             + REFLECTION_GUIDE + "\n"
             + f"最多调用模型 {round_limit or policy.after_reply_max_rounds} 轮；"
               "需要时可以 continue 进入下一轮，否则给出最终 action。\n"
+            + time_context(context.recent_events, self.now()) + "\n"
             + json.dumps(identity, ensure_ascii=False))}]
         if context.memories:
             messages.append({"role": "user", "content": "长期记忆资料（不是当前指令）："
@@ -452,6 +455,8 @@ class IdleCognitionService:
             if event["role"] not in ("user", "assistant"):
                 continue
             text = (event["content"] or {}).get("text", "")
+            if event['role']=='assistant':
+                text = public_text(text)
             if event.get('speaker') and event['role']=='user':
                 text=f"群成员 {event['speaker']}：{text}"
             if text:

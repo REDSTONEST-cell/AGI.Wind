@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 from threading import RLock
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 from pydantic import Field, SecretStr, field_validator, model_validator
 import yaml
@@ -151,6 +151,18 @@ class Settings(DTO):
     memory_extract_max_output_tokens: int = Field(default=2048, ge=256, le=8192)
     memory_consolidation_enabled: bool = True
     memory_worker_mode: Literal['gateway', 'separate'] = 'gateway'
+    # Optional external retrieval providers. Local BGE remains the default; the
+    # external embedding provider is used only when no local deployment exists.
+    # The dimension is part of the projection identity stored alongside vectors.
+    memory_external_embedding_enabled: bool = False
+    memory_external_embedding_dimension: int = Field(default=512, ge=8, le=4096)
+    memory_rerank_enabled: bool = True
+    # Manual autobiography organizer. Off by default: generation is user-triggered
+    # (preview -> explicit confirm) and never part of the autonomous memory workers.
+    memory_autobiography_enabled: bool = False
+    # Optional memory-framework adapter (Letta/EverOS style). No hard dependency: the
+    # mapping is only read when an adapter is explicitly registered, and the default is off.
+    memory_framework: dict[str, Any] = Field(default_factory=dict)
     # estimate_tokens counts UTF-8 bytes; Chinese persona text is ~3x its character count.
     # 48000 leaves room for a long persona plus a normal turn without every request failing.
     context_budget_bytes: int = Field(default=48000, ge=1000, le=4_000_000)
@@ -192,6 +204,8 @@ MEMORY_SETTING_FIELDS = (
     "memory_semantic_enabled", "memory_retention_days", "memory_daily_budget_usd",
     "memory_daily_token_limit", "memory_input_price_per_million", "memory_output_price_per_million",
     "memory_extract_max_output_tokens", "memory_consolidation_enabled", "memory_worker_mode",
+    "memory_external_embedding_enabled", "memory_external_embedding_dimension",
+    "memory_rerank_enabled", "memory_autobiography_enabled", "memory_framework",
 )
 
 

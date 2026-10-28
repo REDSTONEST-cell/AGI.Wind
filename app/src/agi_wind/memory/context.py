@@ -75,7 +75,7 @@ class ContextBuilder:
                 if row['content'].get('attachments'): content['attachments'] = row['content']['attachments']
                 cost = self.token_count(json.dumps(content, ensure_ascii=False))
                 if recent_cost + cost > 4000 or used + cost > self.total_budget: break
-                entry = {"event_id": str(row["id"]), "role": row["role"], "content": content}
+                entry = {"event_id": str(row["id"]), "role": row["role"], "content": content, "recorded_at": row["recorded_at"].isoformat()}
                 if group_scene and row["role"] == "user":
                     entry["speaker"] = speaker_label(None, {"card_name": row["sender_card"], "display_name": row["sender_name"],
                                                             "external_user_id": row["sender_external_id"]})

@@ -477,6 +477,16 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--accent); ou
 
 .msg { display: flex; align-items: flex-start; gap: 10px; max-width: 100%; margin-top: 14px; }
 .msg[data-role="user"] { flex-direction: row-reverse; }
+/* A group window is viewed from the bot's QQ account. Roles stay semantic. */
+.msg[data-group="true"][data-side="right"] { flex-direction: row-reverse; }
+.msg[data-group="true"][data-side="left"] { flex-direction: row; }
+.msg[data-group="true"][data-side="right"] .msg-body { align-items: flex-end; }
+.msg[data-group="true"][data-side="left"] .msg-body { align-items: flex-start; }
+.msg[data-group="true"] .msg-head { display: flex; order: 0; }
+.msg[data-group="true"] .msg-name { display: inline; }
+.msg[data-group="true"][data-side] + .msg[data-group="true"] > .avatar { visibility: visible; height: auto; }
+.msg[data-group="true"][data-side="left"] .bubble { background: var(--bubble-in); color: var(--text); border: 1px solid var(--bubble-in-line); border-radius: 6px 18px 18px 18px; }
+.msg[data-group="true"][data-side="right"] .bubble { background: var(--bubble-out); color: var(--bubble-out-fg); border-color: transparent; border-radius: 18px 6px 18px 18px; box-shadow: none; }
 .chat-time + .msg { margin-top: 6px; }
 .msg[data-role="assistant"] + .msg[data-role="assistant"],
 .msg[data-role="user"] + .msg[data-role="user"] { margin-top: 4px; }
@@ -721,8 +731,13 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--accent); ou
 .memory-metric strong { font-size: 24px; line-height: 1.25; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .memory-metric.accent strong { color: var(--accent); }
 .memory-metric span { color: var(--text-3); font-size: 12px; }
-.memory-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
-.memory-layout:has(> .memory-detail:not([hidden])) { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+/* 记忆条目总览：长列表移入抽屉，页面只保留入口与说明 */
+.memory-overview { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.memory-overview-copy { flex: 1 1 420px; min-width: 0; }
+.memory-overview-copy h2 { margin: 0 0 6px; font-size: 17px; }
+.memory-overview-copy .meta { margin: 0; }
+.memory-overview-copy .body-text { margin: 8px 0 0; color: var(--text-2); font-size: 13.5px; line-height: 1.75; }
+.memory-overview > .btn { flex: none; }
 .memory-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .memory-filters > .input { flex: 1 1 220px; }
 .memory-filters .select { flex: 0 1 128px; width: auto; }
@@ -740,7 +755,6 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--accent); ou
 .memory-item .memory-actions .btn { height: 28px; border-color: var(--line); background: transparent; }
 .memory-item .memory-actions .btn:hover { background: var(--surface); border-color: var(--line-strong); }
 .memory-empty { padding: 20px 0; color: var(--text-3); font-size: 13px; line-height: 1.7; text-align: center; list-style: none; }
-.memory-detail { position: sticky; top: 24px; }
 .memory-detail-content { margin: 0; font-size: 15px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 .memory-facts { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 8px 12px; margin: 16px 0; padding: 14px 0; border-block: 1px solid var(--line); font-size: 13px; }
 .memory-facts dt { color: var(--text-3); }
@@ -1097,8 +1111,6 @@ input[type=checkbox].switch:focus-visible { outline: 2px solid var(--accent); ou
   .agent-settings-grid.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1000px) {
-  .memory-layout:has(> .memory-detail:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
-  .memory-detail { position: static; }
   .grid.two-up, .grid { grid-template-columns: minmax(0, 1fr); }
   .stat-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
@@ -1284,6 +1296,60 @@ body.memory-drawer-open { overflow: hidden; }
   .memory-drawer-body .setting-row:has(> select),
   .memory-drawer-body .setting-row:has(> .memory-policy-controls) { flex-direction: column; align-items: stretch; }
   .memory-drawer-body .memory-policy-controls { justify-content: flex-start; gap: 8px; }
+}
+
+/* ---------- memory list drawer（记忆条目右侧抽屉） ---------- */
+.memory-list-backdrop { position: fixed; inset: 0; z-index: 82; background: var(--overlay); backdrop-filter: blur(2px); }
+.memory-list-drawer {
+  position: fixed; top: 0; right: 0; z-index: 83;
+  display: flex; flex-direction: column;
+  width: min(720px, 96vw); height: 100vh; height: 100dvh;
+  overflow: hidden; background: var(--surface-2);
+  border-left: 1px solid var(--line); box-shadow: var(--shadow-3);
+  transform: translateX(102%); transition: transform .22s var(--ease);
+  will-change: transform;
+}
+.memory-list-drawer.open { transform: translateX(0); }
+body.memory-list-open { overflow: hidden; }
+body.memory-list-open .workspace { overflow: hidden; }
+
+.memory-list-head { display: flex; flex: none; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 14px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.memory-list-head h2 { margin: 0 0 4px; font-size: 19px; }
+.memory-list-head .meta { margin: 0; font-size: 12.5px; color: var(--text-2); }
+.memory-list-body { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
+
+/* 搜索与筛选固定在抽屉顶部，只有列表区域滚动 */
+.memory-list-toolbar { position: sticky; top: 0; z-index: 2; flex: none; padding: 14px 22px 10px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+.memory-list-toolbar .search-field { flex: 1 1 100%; }
+.memory-list-toolbar-foot { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 22px; border-bottom: 1px solid var(--line); }
+.memory-list-toolbar-foot .meta { margin: 0; font-size: 12.5px; }
+.memory-list-toolbar-foot .btn { flex: none; }
+
+.memory-list-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 22px max(24px, env(safe-area-inset-bottom)); overscroll-behavior: contain; scrollbar-gutter: stable; }
+.memory-list-scroll .memories { margin: 0; }
+.memory-load-more { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 0 4px; }
+.memory-load-more[hidden] { display: none; }
+.memory-load-more .meta { margin: 0; font-size: 12px; text-align: center; }
+
+/* 详情面板覆盖列表区域，自己滚动，不改变抽屉尺寸 */
+.memory-detail-panel { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; background: var(--surface-2); }
+.memory-detail-panel[hidden] { display: none; }
+.memory-detail-head { display: flex; flex: none; align-items: center; gap: 12px; padding: 16px 22px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.memory-detail-head h2 { flex: 1; min-width: 0; margin: 0; font-size: 17px; }
+.memory-detail-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 22px max(24px, env(safe-area-inset-bottom)); overscroll-behavior: contain; scrollbar-gutter: stable; }
+
+@media (max-width: 760px) {
+  .memory-list-drawer { width: 100vw; max-width: 100vw; border-left: 0; }
+  .memory-list-head { padding: 16px 16px 12px; }
+  .memory-list-toolbar { padding: 12px 16px 8px; }
+  .memory-list-toolbar .select { flex: 1 1 calc(50% - 4px) !important; }
+  .memory-list-toolbar .btn { flex: 1 1 100%; }
+  .memory-list-toolbar-foot { padding: 8px 16px; }
+  .memory-list-scroll { padding: 12px 16px max(20px, env(safe-area-inset-bottom)); }
+  .memory-detail-panel { position: fixed; inset: 0; z-index: 84; }
+  .memory-detail-head { flex-wrap: wrap; padding: 12px 16px 10px; }
+  .memory-detail-head h2 { flex: 1; font-size: 16px; }
+  .memory-detail-scroll { padding: 14px 16px max(20px, env(safe-area-inset-bottom)); }
 }
 
 /* ---------- QQ group windows ---------- */

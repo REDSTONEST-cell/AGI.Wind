@@ -7,6 +7,7 @@ code = code.replace("'./call-audio.js?v=20261026-call1'",JSON.stringify('data:te
 code = code.replaceAll('import.meta.url', "'http://localhost:18440/client/realtime-call.js'");
 const {createRealtimeCall} = await import('data:text/javascript;base64,'+Buffer.from(code).toString('base64'));
 const tick = () => new Promise(resolve=>setImmediate(resolve));
+const sleep = (ms) => new Promise(resolve=>setTimeout(resolve,ms));
 const defer = () => { let resolve; const promise=new Promise(r=>{resolve=r;}); return {promise,resolve}; };
 let cleanup;
 afterEach(async()=>{ await cleanup?.(); cleanup=null; });
@@ -90,7 +91,10 @@ test('barge-in stops playback and ignores audio from the previous epoch',async()
   assert.ok(ws.sent.some(x=>typeof x==='string'&&JSON.parse(x).type==='speak'));
   const packet=new ArrayBuffer(100);new DataView(packet).setUint32(0,1,true);
   ws.emit(packet);assert.equal(env.sources.length,1);
-  ws.emit({type:'speech_start'});assert.equal(env.sources[0].stopped,true);
+  // VAD alone no longer cancels playback; only a stable recognized partial does.
+  ws.emit({type:'speech_start'});assert.ok(!env.sources[0].stopped);
+  ws.emit({type:'partial',text:'插话'});await sleep(320);ws.emit({type:'partial',text:'插话'});
+  assert.equal(env.sources[0].stopped,true);
   ws.emit(packet);assert.equal(env.sources.length,1);
   await env.call.stop();assert.equal(env.track.stopped,true);assert.deepEqual(env.errors,[]);
 });
@@ -110,7 +114,7 @@ test('long replies respect speech credits and barge-in discards pending chunks',
   const count=()=>ws.sent.filter(x=>typeof x==='string'&&JSON.parse(x).type==='speak').length;
   assert.equal(count(),16);
   ws.emit({type:'speech_credit',epoch:1,credits:10});assert.equal(count(),26);
-  ws.emit({type:'speech_start'});await tick();
+  ws.emit({type:'partial',text:'插话'});await sleep(320);ws.emit({type:'partial',text:'插话'});await tick();
   ws.emit({type:'speech_credit',epoch:1,credits:10});assert.equal(count(),26);
   assert.equal(env.call.active,true);await env.call.stop();
 });
@@ -132,6 +136,7 @@ test('speech start aborts the old SSE and final replaces it while late events st
   await env.call.start();const ws=env.sockets[0];
   ws.emit({type:'speech_start'});ws.emit({type:'final',text:'旧问题',utterance:1});await tick();
   ws.emit({type:'speech_start'});
+  ws.emit({type:'partial',text:'插话'});await sleep(320);ws.emit({type:'partial',text:'插话'});await tick();
   assert.equal(listeners[0].signal.aborted,true);assert.equal(env.turns[0].state,'cancelled');
   ws.emit({type:'final',text:'插话的新问题',utterance:2});await tick();
   assert.equal(env.turns.length,2);assert.equal(env.turns[1].text,'插话的新问题');

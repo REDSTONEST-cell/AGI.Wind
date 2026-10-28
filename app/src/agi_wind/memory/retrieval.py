@@ -8,7 +8,9 @@ from .keyword import terms
 from .chunking import chunk_text, estimate_tokens
 from .lifecycle import extend_after_access, freshness, now_utc, scored_hit_metadata, ttl_for, pin_values
 from .semantic import (active_clause, item_scope, event_scope, verified_refs, chunk_query,
-                       chunk_valid, semantic_candidates, indexable_sources_clause)
+                       chunk_valid, semantic_candidates, semantic_route_label,
+                       indexable_sources_clause)
+from .rerank import rerank_hits
 from ..archive import models as m
 from ..archive.repository import digest, lock
 from ..identity.service import authorize
@@ -88,6 +90,7 @@ class MemoryService:
             ).mappings())
             hits = []
             routes, pinned = {}, set()
+            semantic_route = semantic_route_label(self.db)
             all_refs = verified_refs(conn, scope, structured)
             for memory in structured:
                 refs = all_refs.get(memory["id"], [])
@@ -97,7 +100,7 @@ class MemoryService:
                 mid = memory["id"]
                 semantic = semantic_memories.get(mid, 0)
                 if memory["is_pinned"]: pinned.add(mid)
-                routes[mid] = (["semantic_local"] if semantic else ["structured"])
+                routes[mid] = ([semantic_route] if semantic else ["structured"])
                 if memory["is_pinned"]: routes[mid].append("pinned")
                 lexical = sum(token in memory["content"].lower() or any(token in r["content"].get("text", "").lower() for r in refs) for token in query_terms)/max(1,len(query_terms))
                 if semantic and lexical:
@@ -107,7 +110,7 @@ class MemoryService:
             for key in sorted(scores, key=scores.get, reverse=True):
                 row = records[key]
                 if not chunk_valid(row): continue
-                routes[row["id"]] = ["semantic_local"] if row["id"] in semantic_chunks else ["keyword"]
+                routes[row["id"]] = [semantic_route] if row["id"] in semantic_chunks else ["keyword"]
                 hits.append(MemoryHit(chunk_id=row["id"], content=row["content"], score=scores[key], epistemic_type="assistant_generated" if row["role"] == "assistant" else "user_asserted", source_refs=[SourceRef(event_id=row["source_id"], start_offset=row["start_offset"], end_offset=row["end_offset"], quote_hash=hashlib.sha256(row["content"].encode()).hexdigest())], time_range=(row["occurred_at"], row["occurred_at"])))
             # Diversity discount is deterministic; pins keep priority. Context also
             # enforces a hard two-hit per-source limit and its total token budget.
@@ -120,7 +123,15 @@ class MemoryService:
                 for key in source_ids: counts[key] = counts.get(key,0)+1
             hits.sort(key=lambda hit: (-hit.score, str(hit.memory_id or hit.chunk_id)))
             self._last_routes = routes
-            return hits
+        # Optional external rerank runs last, over a bounded prefix of the already
+        # fused/diversified ordering. It happens after the transaction closes so a
+        # slow provider can never hold a connection or lock; when unconfigured or
+        # failing it keeps the ordering unchanged and never raises into chat.
+        hits, reranked = await rerank_hits(self.db, query, hits)
+        for hit in hits[:reranked]:
+            routes.setdefault(hit.memory_id or hit.chunk_id, []).append("external_rerank")
+        self._last_routes = routes
+        return hits
 
     def stats(self, actor: Actor, companion_id: UUID):
         """Dashboard facts: status/kind/importance distribution and extraction backlog."""

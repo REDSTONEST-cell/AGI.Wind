@@ -4,6 +4,8 @@ from urllib.parse import urlsplit
 import httpx
 from ..core.errors import AppError
 from .protocol import ProviderChunk, ToolCall, ToolTurn
+from ..delivery.output_guard import decode_dsml, public_text
+from uuid import uuid4
 
 class OpenAICompatibleProvider:
     def __init__(self, config, credential, client=None):
@@ -64,6 +66,8 @@ class OpenAICompatibleProvider:
                     choices = data.get("choices", [])
                     if choices:
                         delta = choices[0].get('delta', {})
+                        if delta.get('tool_calls') or delta.get('function_call'):
+                            raise AppError('UNEXPECTED_TOOL_CALL', '本轮返回了工具请求，请在 Agent 模式中重试', 502)
                         reasoning = delta.get('reasoning_content') or delta.get('reasoning')
                         if isinstance(reasoning, str) and reasoning: yield ProviderChunk('reasoning', reasoning)
                         text = delta.get('content')
@@ -143,6 +147,13 @@ class OpenAICompatibleProvider:
             if text is not None and not isinstance(text, str): raise ValueError('invalid text')
             if not isinstance(reasoning, str) or len(reasoning) > 64000 or len(text or '') > 48000: raise ValueError('oversized text')
             raw_calls = message.get('tool_calls') or []
+            legacy = message.get('function_call')
+            if legacy:
+                if raw_calls or not isinstance(legacy,dict) or not tools or tool_choice=='none':
+                    raise ValueError('unexpected legacy tool call')
+                if legacy.get('name') not in {item['function']['name'] for item in tools}:
+                    raise ValueError('legacy tool not enabled')
+                raw_calls=[{'id':'legacy_'+uuid4().hex,'type':'function','function':legacy}]
             if not isinstance(raw_calls, list) or len(raw_calls) > 8: raise ValueError('invalid calls')
             calls, identifiers = [], set()
             for call in raw_calls:
@@ -153,7 +164,13 @@ class OpenAICompatibleProvider:
                     raise ValueError('invalid tool call')
                 identifiers.add(identifier)
                 calls.append(ToolCall(identifier, name, arguments))
-            return ToolTurn(text or '', reasoning, tuple(calls))
+            reply_text, dsml_calls = decode_dsml(text or '')
+            if dsml_calls:
+                if calls or not tools or tool_choice == 'none': raise ValueError('unexpected DSML tool call')
+                allowed = {item['function']['name'] for item in tools}
+                if any(name not in allowed for name, _ in dsml_calls): raise ValueError('DSML tool not enabled')
+                calls = [ToolCall('dsml_' + uuid4().hex, name, args) for name, args in dsml_calls]
+            return ToolTurn(public_text(reply_text), reasoning, tuple(calls))
         except AppError: raise
         except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError, AttributeError):
             raise AppError('AGENT_RESPONSE_INVALID', '模型工具响应无效或不完整', 503) from None

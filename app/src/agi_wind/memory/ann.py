@@ -2,6 +2,8 @@
 
 No files, model downloads or user text are held here. Native imports are lazy so
 an unavailable binary only disables semantic retrieval, preserving keyword search.
+The dimension is explicit because external embedding providers may differ; the
+default keeps the local 512-dimensional BGE space source-compatible.
 """
 import math
 import hashlib
@@ -10,11 +12,12 @@ import hashlib
 class VectorIndex:
     backend = 'usearch_hnsw'
 
-    def __init__(self):
+    def __init__(self, dimension=512):
         import numpy as np
         from usearch.index import Index
+        self.dimension = int(dimension)
         self._np = np
-        self._index = Index(ndim=512, metric='cos', dtype='f32',
+        self._index = Index(ndim=self.dimension, metric='cos', dtype='f32',
                             connectivity=16, expansion_add=128, expansion_search=128)
         self._groups = []
         self._vector_keys = {}
@@ -27,7 +30,7 @@ class VectorIndex:
     def add(self, rows):
         keys, vectors = [], []
         for key, raw in rows:
-            if len(raw) != 512 * 4:
+            if len(raw) != self.dimension * 4:
                 raise ValueError('invalid projection dimension')
             values = self._np.frombuffer(raw, dtype='<f4')
             if not self._np.isfinite(values).all() or self._np.linalg.norm(values) < 1e-12:
@@ -50,7 +53,7 @@ class VectorIndex:
         if not self.size:
             return []
         values = self._np.asarray(vector, dtype='float32')
-        if values.shape != (512,) or not self._np.isfinite(values).all():
+        if values.shape != (self.dimension,) or not self._np.isfinite(values).all():
             raise ValueError('invalid query dimension or values')
         norm = float(self._np.linalg.norm(values))
         if not math.isfinite(norm) or norm < 1e-12:

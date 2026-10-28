@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 from pathlib import Path
 from typing import Any,Literal
@@ -35,6 +36,7 @@ from ..memory.extraction import Extractor
 from ..memory.jobs import MEMBER_EXTRACT, MEMORY_EXTRACT, enqueue_manual_extraction, run_extraction, run_member_extraction
 from ..memory.lifecycle import maintain as maintain_memories
 from ..memory.consolidation import MEMORY_CONSOLIDATE, enqueue_consolidation, run_consolidation, SUMMARY_PROMPT
+from ..memory.autobiography import AutobiographyConfig,AutobiographyOrganizer,GROUPINGS,SqlAutobiographyWriter
 from ..memory.budget import MemoryBudget
 from ..delivery.service import GenerationService,generation_scope,TERMINAL
 from ..delivery.proactive import ProactiveService
@@ -83,6 +85,10 @@ class MemorySummaryRequest(DTO):
     companion_id:UUID
     level:Literal['daily','weekly']='daily'
 class RecallTestRequest(DTO): companion_id:UUID; query:str=Field(min_length=1,max_length=500)
+class AutobiographyPreviewRequest(DTO):
+    companion_id:UUID
+    group_by:Literal['period','kind','subject']|None=None
+class AutobiographyActionRequest(DTO): companion_id:UUID
 class MemorySettingsPatch(DTO):
     extraction_enabled:bool|None=None
     batch_events:int|None=Field(default=None,ge=1,le=32)
@@ -91,6 +97,9 @@ class MemorySettingsPatch(DTO):
     maintenance_enabled:bool|None=None
     maintenance_hours:float|None=Field(default=None,gt=0,le=720)
     semantic_enabled:bool|None=None
+    external_embedding_enabled:bool|None=None
+    external_embedding_dimension:int|None=Field(default=None,ge=8,le=4096)
+    rerank_enabled:bool|None=None
     retention_days:dict[str,float]|None=None
     daily_budget_usd:float|None=Field(default=None,ge=0,le=100)
     daily_token_limit:int|None=Field(default=None,ge=0,le=100_000_000)
@@ -99,6 +108,10 @@ class MemorySettingsPatch(DTO):
     max_output_tokens:int|None=Field(default=None,ge=256,le=8192)
     consolidation_enabled:bool|None=None
     worker_mode:Literal['gateway','separate']|None=None
+    autobiography_enabled:bool|None=None
+class MemoryProbe(DTO):
+    model_id:str|None=Field(default=None,max_length=200)
+    parameters:dict[str,Any]=Field(default_factory=dict)
 class VoiceSettingsPatch(DTO):
     enabled:bool|None=None
     base_url:str|None=Field(default=None,max_length=2000)
@@ -175,6 +188,31 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     stickers=StickerService(db)
     ledger=DeletionLedger(settings.data_dir/"governance")
     deletion=DeletionService(db,ledger,assets.root)
+    autobiography_writer=SqlAutobiographyWriter(db,retention_days=settings.memory_retention_days)
+    autobiography_organizers={}
+    autobiography_lock=threading.Lock()
+
+    def autobiography_scope(current,companion_id):
+        # Autobiographies are strictly owner-private; group/scene callers never reach here.
+        return {'account_id':str(current.account_id),'user_id':str(current.user_id),
+                'companion_id':str(companion_id),'pool_kind':'owner','visibility':'owner_private'}
+
+    def autobiography_organizer(current,companion_id):
+        key=(current.account_id,current.user_id,companion_id)
+        with autobiography_lock:
+            organizer=autobiography_organizers.get(key)
+            if organizer is None:
+                organizer=AutobiographyOrganizer(autobiography_writer,
+                    scope=autobiography_scope(current,companion_id),config=AutobiographyConfig())
+                autobiography_organizers[key]=organizer
+            return organizer
+
+    def autobiography_require(current,companion_id):
+        if not settings.memory_autobiography_enabled:
+            raise AppError('AUTOBIOGRAPHY_DISABLED','自传整理功能未启用',403)
+        with db.engine.connect() as conn:
+            authorize(conn,current,companion_id)
+        return autobiography_organizer(current,companion_id)
 
     def json_payload(text):
         value=(text or '').strip()
@@ -394,6 +432,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     app.state.browser_sessions=sessions
     app.state.settings=settings
     db.memory_settings=settings
+    app.state.autobiography_writer=autobiography_writer
+    app.state.autobiography_organizers=autobiography_organizers
     app.state.actor=actor
     app.state.settings_store=store
     app.mount("/client",StaticFiles(directory=client_dir),name="client")
@@ -428,6 +468,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
 
     def memory_settings_view():
         from ..memory.runtime import worker_status
+        from ..memory.external import external_embedding_status
+        from ..memory.rerank import rerank_status
         return {
             "extraction_enabled": settings.memory_extraction_enabled,
             "batch_events": settings.memory_extract_batch_events,
@@ -438,6 +480,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             "extractor": getattr(app.state,"memory_extractor_source","unconfigured"),
             'embedding': embedding_status(),
             'semantic_enabled':settings.memory_semantic_enabled,
+            'external_embedding':external_embedding_status(settings),
+            'rerank':rerank_status(settings),
             'retention_days':settings.memory_retention_days,
             'daily_budget_usd':settings.memory_daily_budget_usd,
             'daily_token_limit':settings.memory_daily_token_limit,
@@ -446,6 +490,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             'max_output_tokens':settings.memory_extract_max_output_tokens,
             'consolidation_enabled':settings.memory_consolidation_enabled,
             'worker_mode':settings.memory_worker_mode,
+            'autobiography_enabled':settings.memory_autobiography_enabled,
             'worker':worker_status(settings),
             'budget':MemoryBudget(db,settings).stats(actor.account_id),
         }
@@ -684,6 +729,59 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             return {"ok":response.status_code<400,"status":response.status_code,"message":"端点可访问" if response.status_code<400 else "厂商返回错误状态"}
         except httpx.HTTPError:
             return {"ok":False,"status":0,"message":"无法连接厂商端点"}
+
+    def probe_model_id(provider_id,body):
+        # Prefer an explicit probe model, else any role already bound to this provider.
+        if body is not None and body.model_id: return body.model_id
+        return next((getattr(settings.models,role).model_id for role in type(settings.models).model_fields
+                     if getattr(settings.models,role) is not None and getattr(settings.models,role).provider_id==provider_id),None)
+
+    @app.post("/api/v1/settings/providers/{provider_id}/test-embedding")
+    async def test_embedding_provider(provider_id:str,body:MemoryProbe|None=None,current=Depends(authenticate)):
+        config=settings.providers.get(provider_id)
+        if config is None: raise AppError("NOT_FOUND","服务商不存在",404)
+        if "embedding" not in config.capabilities: raise AppError("UNSUPPORTED_CAPABILITY","该服务商未启用 embedding 能力",422)
+        credential=store.get(config.credential_ref)
+        if not credential: raise AppError("CREDENTIAL_REQUIRED","尚未保存 API Key",409)
+        model_id=probe_model_id(provider_id,body)
+        if not model_id: raise AppError("MODEL_REQUIRED","请先选择 embedding 模型",422)
+        import httpx
+        from ..memory.external import ExternalEmbeddingClient
+        client=ExternalEmbeddingClient(base_url=config.base_url,model_id=model_id,credential=credential,
+            dimension=int(settings.memory_external_embedding_dimension),parameters=dict(body.parameters if body else {}),
+            timeout_seconds=min(config.timeout_seconds,8.0))
+        try:
+            vectors=await client.embed(["ping"])
+        except httpx.HTTPStatusError as error:
+            return {"ok":False,"status":error.response.status_code,"message":"厂商返回错误状态"}
+        except httpx.HTTPError:
+            return {"ok":False,"status":0,"message":"无法连接厂商端点"}
+        except (ValueError,KeyError,TypeError):
+            return {"ok":False,"status":0,"message":"响应格式或向量维度不匹配"}
+        return {"ok":True,"status":200,"message":"embedding 端点可访问","dimension":len(vectors[0])}
+
+    @app.post("/api/v1/settings/providers/{provider_id}/test-rerank")
+    async def test_rerank_provider(provider_id:str,body:MemoryProbe|None=None,current=Depends(authenticate)):
+        config=settings.providers.get(provider_id)
+        if config is None: raise AppError("NOT_FOUND","服务商不存在",404)
+        if "rerank" not in config.capabilities: raise AppError("UNSUPPORTED_CAPABILITY","该服务商未启用 rerank 能力",422)
+        credential=store.get(config.credential_ref)
+        if not credential: raise AppError("CREDENTIAL_REQUIRED","尚未保存 API Key",409)
+        model_id=probe_model_id(provider_id,body)
+        if not model_id: raise AppError("MODEL_REQUIRED","请先选择 rerank 模型",422)
+        import httpx
+        from ..memory.rerank import RerankClient
+        client=RerankClient(base_url=config.base_url,model_id=model_id,credential=credential,
+            timeout_seconds=min(config.timeout_seconds,8.0))
+        try:
+            scores=await client.rerank("ping",["ping one","ping two"])
+        except httpx.HTTPStatusError as error:
+            return {"ok":False,"status":error.response.status_code,"message":"厂商返回错误状态"}
+        except httpx.HTTPError:
+            return {"ok":False,"status":0,"message":"无法连接厂商端点"}
+        except (ValueError,KeyError,TypeError):
+            return {"ok":False,"status":0,"message":"响应格式不匹配"}
+        return {"ok":True,"status":200,"message":"rerank 端点可访问","results":len(scores)}
 
     @app.get("/api/v1/companions")
     def companions(current=Depends(authenticate)):
@@ -976,6 +1074,39 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             job_id=enqueue_manual_extraction(conn,scope)
         wakeup.set()
         return {"queued":True,"job_id":job_id}
+
+    @app.get("/api/v1/memory/autobiography/status")
+    def autobiography_status(companion_id:UUID,current=Depends(authenticate)):
+        with db.engine.connect() as conn:
+            authorize(conn,current,companion_id)
+        enabled=bool(settings.memory_autobiography_enabled)
+        organizer=autobiography_organizer(current,companion_id) if enabled else None
+        config=organizer.config if organizer is not None else AutobiographyConfig()
+        return {"enabled":enabled,"groupings":list(GROUPINGS),"group_by":config.grouping_name(),
+                "pending_previews":len(organizer.pending_preview_ids()) if organizer is not None else 0,
+                "max_entries":config.max_entries,"max_entries_per_chapter":config.max_entries_per_chapter}
+
+    @app.post("/api/v1/memory/autobiography/previews",status_code=201)
+    def create_autobiography_preview(body:AutobiographyPreviewRequest,current=Depends(authenticate)):
+        organizer=autobiography_require(current,body.companion_id)
+        rows=MemoryService(db).list_items(current,body.companion_id,status="active",
+            limit=organizer.config.max_entries,pool="owner")
+        selected=[row for row in rows if row.get("summary_level")=="" and row.get("visibility")=="owner_private"
+                  and row.get("pool_kind")=="owner"]
+        preview=organizer.preview(selected,group_by=body.group_by)
+        return {"preview":preview.to_dict()}
+
+    @app.post("/api/v1/memory/autobiography/previews/{preview_id}/confirm")
+    def confirm_autobiography_preview(preview_id:str,body:AutobiographyActionRequest,current=Depends(authenticate)):
+        organizer=autobiography_require(current,body.companion_id)
+        record=organizer.confirm(preview_id)
+        return {"record":record.to_dict()}
+
+    @app.post("/api/v1/memory/autobiography/records/{record_id}/undo")
+    def undo_autobiography_record(record_id:str,body:AutobiographyActionRequest,current=Depends(authenticate)):
+        organizer=autobiography_require(current,body.companion_id)
+        record=organizer.undo(record_id)
+        return {"record":record.to_dict()}
 
     @app.get("/api/v1/events/{event_id}")
     def event_source(event_id:UUID,current=Depends(authenticate)):

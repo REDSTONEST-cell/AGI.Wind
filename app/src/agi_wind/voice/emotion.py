@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from ..delivery.output_guard import VisibleTextGuard
 
 EMOTIONS = ("开心", "平静", "难过", "担心", "撒娇", "生气", "惊讶", "温柔")
 DEFAULT_EMOTION = "平静"
@@ -43,12 +44,12 @@ INSTRUCTIONS = {
 
 
 _DIRECTIVE = re.compile(
-    r"^\s*(?:\[|【)\s*(情绪|表情包)\s*(?:[:：]\s*([^\]】\n]{0,40}?))?\s*(?:\]|】)"
+    r"^\s*(?:\[|【)\s*(情绪|心情|表情包)\s*(?:[:：]\s*([^\]】\n]{0,40}?))?\s*(?:\]|】)"
 )
 _BARE_EMOTION = re.compile(
     r"^\s*(?:\[|【)\s*(" + "|".join(re.escape(value) for value in (*EMOTIONS, *ALIASES)) + r")\s*(?:\]|】)"
 )
-_DIRECTIVE_PREFIXES = ("[情绪", "[表情包", "【情绪", "【表情包") + tuple(
+_DIRECTIVE_PREFIXES = ("[心情", "【心情", "[情绪", "[表情包", "【情绪", "【表情包") + tuple(
     "[" + name for name in (*EMOTIONS, *ALIASES)
 ) + tuple("【" + name for name in (*EMOTIONS, *ALIASES))
 
@@ -64,6 +65,7 @@ class EmotionTagStream:
     """
 
     def __init__(self, max_prefix: int = 80):
+        self._visible = VisibleTextGuard()
         self.max_prefix = max_prefix
         self.buffer = ""
         self.resolved = False
@@ -85,7 +87,7 @@ class EmotionTagStream:
                     continue
                 return
             name, value = match.group(1), (match.group(2) or "").strip()
-            if name == "情绪":
+            if name in ("情绪", "心情"):
                 if value:
                     self.raw_tag = value.strip("。.!！?？ ")
                     self.emotion = normalize_emotion(self.raw_tag)
@@ -102,6 +104,9 @@ class EmotionTagStream:
         return visible
 
     def feed(self, text: str) -> str:
+        return self._visible.feed(self._feed(text))
+
+    def _feed(self, text: str) -> str:
         if self.resolved:
             if self._strip_leading_newline:
                 text = text.lstrip("\r\n")
@@ -122,6 +127,9 @@ class EmotionTagStream:
         return self._resolve()
 
     def flush(self) -> str:
+        return self._visible.feed(self._flush()) + self._visible.flush()
+
+    def _flush(self) -> str:
         if self.resolved:
             return ""
         self._consume_directives()

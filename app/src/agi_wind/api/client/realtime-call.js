@@ -10,6 +10,19 @@ export function createRealtimeCall(client, hooks) {
   let socket, stream, context, capture, source, player, ping, turn;
   let conversationId = '', callId = '', rate = 24000, lastUtterance = 0;
   let speechStarted = false, speechCredits = 0, pendingSpeech = [];
+  let speechCandidate = '', speechCandidateSince = 0;
+  const speechText = (text) => typeof text === 'string' ? text.replace(/[^\p{L}\p{N}]/gu, '') : '';
+  function resetSpeechCandidate() { speechCandidate = ''; speechCandidateSince = 0; }
+  function confirmedSpeech(text) {
+    const candidate = speechText(text);
+    if (candidate.length < 2) { resetSpeechCandidate(); return false; }
+    const now = performance.now();
+    if (!speechCandidate || !(candidate.startsWith(speechCandidate) || speechCandidate.startsWith(candidate))) {
+      speechCandidateSince = now;
+    }
+    speechCandidate = candidate;
+    return now - speechCandidateSince >= 300;
+  }
   let cancelling = Promise.resolve();
   const send = (value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
   const label = (text) => { status.textContent = text; };
@@ -95,6 +108,9 @@ export function createRealtimeCall(client, hooks) {
             });
             if (state.state === 'completed') {
               terminal = true;
+              // A clean server completion can outlive a disconnected SSE stream.
+              // The remaining sentence still belongs to this call/epoch.
+              speak(chunks.flush());
               current.view.finish('completed');
               log('通话回复已完成', {elapsed_ms:Math.round(performance.now()-started)});
               return;
@@ -121,12 +137,18 @@ export function createRealtimeCall(client, hooks) {
     }
     const value = JSON.parse(event.data);
     if (value.type === 'speech_start' && !muted) {
-      void interrupt(); speechStarted = true;
-      label('正在听你说…'); caption.textContent = '';
+      // VAD also fires on clicks, breaths and background noise. Keep playing until
+      // recognition confirms a stable utterance; never cancel on VAD alone.
+      resetSpeechCandidate(); caption.textContent = '';
     } else if (value.type === 'partial' && !muted) {
       caption.textContent = value.text;
+      if (!speechStarted && confirmedSpeech(value.text)) {
+        void interrupt(); speechStarted = true; label('正在听你说…');
+      }
     } else if (value.type === 'final' && !muted && value.utterance > lastUtterance) {
       lastUtterance = value.utterance;
+      resetSpeechCandidate();
+      if (!speechText(value.text)) { speechStarted = false; caption.textContent = ''; return; }
       caption.textContent = value.text;
       // A final may arrive without a VAD start; it must still replace the old turn.
       if (!speechStarted) void interrupt();
@@ -153,6 +175,7 @@ export function createRealtimeCall(client, hooks) {
     starting = true; const expectedSession = ++session;
     button.setAttribute('aria-pressed','true'); button.textContent = '挂断'; panel.hidden = false;
     label('连接语音服务…'); caption.textContent = ''; muted = false; lastUtterance = 0; epoch = 0; speechStarted = false;
+    resetSpeechCandidate();
     pendingSpeech = []; speechCredits = 0;
     try {
       const selected = await hooks.prepare();
@@ -220,6 +243,7 @@ export function createRealtimeCall(client, hooks) {
   async function stop() {
     if (!active && !starting && !context) return;
     session += 1; active = false; starting = false;
+    resetSpeechCandidate(); speechStarted = false;
     const cancelled = interrupt();
     clearInterval(ping);
     if (socket) { socket.onclose = null; socket.close(); socket = null; }
@@ -238,7 +262,7 @@ export function createRealtimeCall(client, hooks) {
   mute.addEventListener('click', () => {
     muted = !muted;
     stream?.getAudioTracks().forEach(track=>{track.enabled = !muted;});
-    interrupt(); speechStarted = false; send({type:'reset'}); caption.textContent = '';
+    interrupt(); speechStarted = false; resetSpeechCandidate(); send({type:'reset'}); caption.textContent = '';
     label(muted ? '麦克风已静音' : '正在聆听…');
     mute.textContent = muted ? '取消静音' : '静音'; mute.setAttribute('aria-pressed',String(muted));
   });

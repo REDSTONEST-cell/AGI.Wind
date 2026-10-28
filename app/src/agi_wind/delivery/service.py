@@ -17,6 +17,7 @@ from ..voice.emotion import EmotionTagStream
 from ..voice.text import clean_for_speech
 from . import models as d
 from .reasoning import ReasoningBuffer
+from .output_guard import time_context, public_text
 from .segments import ReplySegmenter
 from .stream import emit, emit_live, to_event, finish_open_tools
 
@@ -572,7 +573,7 @@ class GenerationService:
 
     def messages(self, context, vision, scope=None, *, include_sticker=True):
         identity = {"persona":context.persona_snapshot.model_dump(mode="json")}
-        guide = EMOTION_GUIDE
+        guide = EMOTION_GUIDE + "\n" + time_context(context.recent_events)
         group_scene = scope is not None and getattr(scope, "scene", "owner_private") == "group"
         if group_scene:
             guide += ("\n【QQ群聊】这是QQ群聊，群内所有成员共用同一条时间线。你不是主人的私人替身：不继承主人的私密关系、承诺或私聊内容，"
@@ -600,6 +601,8 @@ class GenerationService:
         for event in context.recent_events:
             if event["role"] not in ("user", "assistant"): continue
             text = event["content"].get("text", "")
+            if event["role"] == "assistant":
+                text = public_text(text)
             # Only incoming member messages get a speaker tag. Tagging the bot's
             # own history made the model copy the format and emit "[鱼丸] ...".
             if group_scene:

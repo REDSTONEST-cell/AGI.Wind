@@ -18,7 +18,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/client/styles.css?v=20261027mic1">
+  <link rel="stylesheet" href="/client/styles.css?v=20261028-memdrawer1">
 </head>
 <body>
   <!-- 线性图标集：统一 24px 网格、1.75 描边 -->
@@ -370,7 +370,7 @@
             <div class="page-heading-copy">
               <div class="eyebrow">她的档案</div>
               <h1>记忆</h1>
-              <p>聊天完成后异步提炼长期记忆；可以搜索、纠正、隐藏，并维护生命周期。检索方式和后台状态可在下方设置中查看。</p>
+              <p>聊天完成后异步提炼长期记忆；可以搜索、纠正、隐藏，并维护生命周期。记忆条目收纳在右侧抽屉里，页面高度不再随条数增长。</p>
             </div>
             <div class="page-actions">
               <span class="chip" id="memory-extractor-chip">提炼状态读取中…</span>
@@ -387,13 +387,27 @@
             <div class="memory-metric"><strong id="memory-stat-jobs">–</strong><span>提炼任务</span></div>
           </div>
 
-          <div class="memory-layout">
-            <section class="card memory-list-card">
-              <div class="card-head">
-                <div><h2>记忆条目</h2><p class="meta" id="memory-count"></p></div>
-                <button class="btn ghost small" id="memory-refresh" type="button"><svg><use href="#i-refresh"/></svg>刷新</button>
+          <section class="card memory-overview">
+            <div class="memory-overview-copy">
+              <h2>记忆条目</h2>
+              <p class="meta" id="memory-count"></p>
+              <p class="body-text">长期记忆按时间、类型和状态保存在服务端。打开抽屉后可以搜索、筛选、分页浏览，并查看来源证据、纠正、固定或隐藏；抽屉内部滚动，不会改变本页高度或滚动位置。</p>
+            </div>
+            <button class="btn primary" id="memory-list-open" type="button" aria-haspopup="dialog" aria-controls="memory-list-drawer"><svg><use href="#i-memory"/></svg>浏览记忆条目</button>
+          </section>
+
+          <!-- 记忆条目抽屉：长列表移出页面，抽屉内滚动 + 加载更多 -->
+          <div class="memory-list-backdrop" id="memory-list-backdrop" hidden></div>
+          <aside class="memory-list-drawer" id="memory-list-drawer" hidden role="dialog" aria-modal="true" aria-labelledby="memory-list-title">
+            <div class="memory-list-head">
+              <div class="memory-list-head-copy">
+                <h2 id="memory-list-title">记忆条目</h2>
+                <p class="meta" id="memory-list-count"></p>
               </div>
-              <form class="memory-filters" id="memory-search">
+              <button class="icon-button ghost" id="memory-list-close" type="button" aria-label="关闭记忆条目" title="关闭"><svg><use href="#i-close"/></svg></button>
+            </div>
+            <div class="memory-list-body">
+              <form class="memory-filters memory-list-toolbar" id="memory-search">
                 <div class="search-field"><svg><use href="#i-search"/></svg><input id="memory-query" class="input" placeholder="搜索记忆或原始对话，例如：海边、生日、承诺" aria-label="搜索记忆"></div>
                 <select id="memory-kind" class="select" aria-label="记忆类型">
                   <option value="">全部类型</option>
@@ -427,25 +441,34 @@
                 </select>
                 <button class="btn primary" type="submit">搜索</button>
               </form>
-              <p class="meta" id="memory-hint"></p>
-              <ul class="memories" id="memories"></ul>
-            </section>
-
-            <aside class="card memory-detail" id="memory-detail" hidden>
-              <div class="card-head">
-                <h2>记忆详情</h2>
-                <button class="icon-button ghost" id="memory-detail-close" type="button" aria-label="关闭详情" title="关闭"><svg><use href="#i-close"/></svg></button>
+              <div class="memory-list-toolbar-foot">
+                <p class="meta" id="memory-hint"></p>
+                <button class="btn ghost small" id="memory-refresh" type="button"><svg><use href="#i-refresh"/></svg>刷新</button>
               </div>
-              <div id="memory-detail-body"></div>
-            </aside>
-          </div>
+              <div class="memory-list-scroll" id="memory-list-scroll">
+                <ul class="memories" id="memories"></ul>
+                <div class="memory-load-more" id="memory-load-more" hidden>
+                  <button class="btn ghost" id="memory-load-more-button" type="button">加载更多</button>
+                  <p class="meta" id="memory-load-more-hint"></p>
+                </div>
+              </div>
+              <aside class="memory-detail-panel" id="memory-detail" hidden>
+                <div class="memory-detail-head">
+                  <button class="btn ghost small" id="memory-detail-back" type="button">← 返回列表</button>
+                  <h2>记忆详情</h2>
+                  <button class="icon-button ghost" id="memory-detail-close" type="button" aria-label="关闭详情" title="关闭"><svg><use href="#i-close"/></svg></button>
+                </div>
+                <div id="memory-detail-body" class="memory-detail-scroll"></div>
+              </aside>
+            </div>
+          </aside>
 
           <div class="memory-drawer-backdrop" id="memory-drawer-backdrop" hidden></div>
           <aside class="memory-drawer" id="memory-drawer" hidden aria-label="记忆工具与设置">
             <div class="memory-drawer-head">
               <div>
                 <h2>记忆工具与设置</h2>
-                <p class="meta">召回测试、分布、提炼任务与预算设置；不影响上面的记忆列表。</p>
+                <p class="meta">召回测试、分布、提炼任务与预算设置；不影响记忆条目列表。</p>
               </div>
               <button class="icon-button ghost" id="memory-drawer-close" type="button" aria-label="关闭记忆工具" title="关闭"><svg><use href="#i-close"/></svg></button>
             </div>
@@ -1105,6 +1128,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="/client/app.js?v=20261027callfix1"></script>
+  <script type="module" src="/client/app.js?v=20261028-memdrawer1"></script>
 </body>
 </html>

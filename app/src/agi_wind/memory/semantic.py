@@ -1,8 +1,10 @@
-"""Disposable local-CPU vector projection. Authority and provenance stay in PostgreSQL.
+"""Disposable vector projection. Authority and provenance stay in PostgreSQL.
 
-No model imports/downloads occur in the Gateway. All model I/O requires an explicit
-settings attachment and the two local deployment files. Ranking is deterministic
-cosine ranking, not a neural cross-encoder.
+The local-CPU BGE deployment is the default. When no local deployment exists an
+operator may enable an external OpenAI-compatible embedding provider; it is used
+only in that case and never replaces a configured local deployment. No model
+imports/downloads occur in the Gateway, and ranking is deterministic cosine
+ranking, not a neural cross-encoder.
 """
 import asyncio
 import hashlib
@@ -21,6 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 from . import models as mm
 from .access import (conversation_pool_clause, item_pool_clause, ref_visible_in_scene)
 from .embedding import EmbeddingSpace
+from .external import ExternalEmbeddingClient, external_embedding_config
 from .lifecycle import now_utc
 from ..archive import models as m
 from ..archive.repository import digest, lock
@@ -176,10 +179,26 @@ def _deployment(db):
 
 
 def semantic_status(db):
-    """Cheap, no-I/O status: pending means deployed but not yet probed this process."""
-    if not _deployment(db):
+    """Cheap status from settings/secret files and the last probe; no provider call.
+
+    Local deployment wins whenever its files exist; the external provider is only
+    reported when it is configured while no local deployment is present.
+    """
+    if _deployment(db):
+        return getattr(db, "_memory_semantic_state", "local_pending")
+    settings = getattr(db, "memory_settings", None)
+    try:
+        external = external_embedding_config(settings) is not None
+    except (OSError, ValueError, KeyError, TypeError):
+        external = False
+    if not external:
         return "keyword_only"
-    return getattr(db, "_memory_semantic_state", "local_pending")
+    return getattr(db, "_memory_semantic_state", "external_pending")
+
+
+def semantic_route_label(db):
+    """Route marker for vector hits, matching the projection actually used."""
+    return "semantic_external" if getattr(db, "_memory_semantic_source", "local") == "external" else "semantic_local"
 
 
 class LocalClient:
@@ -204,31 +223,47 @@ class LocalClient:
         return result["vectors"]
 
 
-def _client(db):
-    deployment = _deployment(db)
-    if not deployment:
+def _external_client(db):
+    """External provider for tests (explicit injection) or an enabled setting.
+
+    The settings gate is evaluated even when a client is injected so disabling
+    external embedding or the semantic master switch also stops test doubles.
+    """
+    config = external_embedding_config(getattr(db, "memory_settings", None))
+    if config is None:
         return None
-    # Explicit dependency injection for isolated encoders; still obey deployment gate.
-    return getattr(db, "memory_semantic_client", None) or LocalClient(*deployment)
+    db._memory_semantic_source = "external"
+    injected = getattr(db, "memory_external_embedding_client", None)
+    return injected if injected is not None else ExternalEmbeddingClient(**config)
 
 
-def pack_vector(vector):
-    if len(vector) != DIMENSION or not all(math.isfinite(float(v)) for v in vector):
+def _client(db):
+    """Local deployment first; external provider only when local is unconfigured."""
+    deployment = _deployment(db)
+    if deployment:
+        db._memory_semantic_source = "local"
+        # Explicit dependency injection for isolated encoders; still obey deployment gate.
+        return getattr(db, "memory_semantic_client", None) or LocalClient(*deployment)
+    return _external_client(db)
+
+
+def pack_vector(vector, dimension=DIMENSION):
+    if len(vector) != dimension or not all(math.isfinite(float(v)) for v in vector):
         raise ValueError("invalid local embedding")
     norm = math.sqrt(sum(float(v)*float(v) for v in vector))
     if norm < 1e-12:
         raise ValueError("zero local embedding")
-    return struct.pack("<512f", *(float(v)/norm for v in vector))
+    return struct.pack("<%df" % dimension, *(float(v)/norm for v in vector))
 
 
-def rank_vectors(vector, rows, limit=80):
+def rank_vectors(vector, rows, limit=80, dimension=DIMENSION):
     """Bounded deterministic cosine ranking; callable in a CPU thread."""
-    q = struct.unpack("<512f", pack_vector(vector))
+    q = struct.unpack("<%df" % dimension, pack_vector(vector, dimension))
     scored = []
     for key, raw in rows:
-        if len(raw) != DIMENSION*4:
+        if len(raw) != dimension*4:
             continue
-        values = struct.unpack("<512f", raw)
+        values = struct.unpack("<%df" % dimension, raw)
         score = sum(a*b for a, b in zip(q, values))
         if math.isfinite(score) and score >= 0.35:
             scored.append((key, score))
@@ -238,10 +273,17 @@ def rank_vectors(vector, rows, limit=80):
 async def index_semantic(db, scope, limit=64):
     """Bounded incremental projection; model work runs outside every DB transaction."""
     limit = max(1, min(64, int(limit)))
-    if not _deployment(db):
-        return {"indexed": 0, "status": "keyword_only"}
     try:
         client = _client(db)
+    except (OSError, ValueError, KeyError, TypeError):
+        failed = "local_unavailable" if _deployment(db) else "external_unavailable"
+        db._memory_semantic_state = failed
+        return {"indexed": 0, "status": failed}
+    if client is None:
+        return {"indexed": 0, "status": "keyword_only"}
+    source = getattr(db, "_memory_semantic_source", "local")
+    success, failed, pending_state = "semantic_" + source, source + "_unavailable", source + "_pending"
+    try:
         space = client.space
         with db.engine.begin() as conn:
             companion = authorize(conn, scope, scope.companion_id)
@@ -269,8 +311,8 @@ async def index_semantic(db, scope, limit=64):
         if not pending:
             # Probe without embedding user content, to avoid declaring a stopped model ready.
             await asyncio.wait_for(client.embed(["状态检查"]), timeout=21)
-            db._memory_semantic_state = "semantic_local"
-            return {"indexed": 0, "status": "semantic_local"}
+            db._memory_semantic_state = success
+            return {"indexed": 0, "status": success}
         # Keep each HTTP batch inside the model service's character/body bounds,
         # even when an imported chunk uses long ASCII text.
         vectors, batch = [], []
@@ -283,12 +325,12 @@ async def index_semantic(db, scope, limit=64):
             vectors.extend(await asyncio.wait_for(client.embed(batch), timeout=21))
         if len(vectors) != len(pending):
             raise ValueError("invalid embedding count")
-        packed = [pack_vector(v) for v in vectors]
+        packed = [pack_vector(v, space.dimension) for v in vectors]
         count = 0
         with db.engine.begin() as conn:
             lock(conn, scope.companion_id)
             if authorize(conn, scope, scope.companion_id)["memory_revision"] != revision:
-                return {"indexed": 0, "status": "local_pending", "reason": "revision_changed"}
+                return {"indexed": 0, "status": pending_state, "reason": "revision_changed"}
             sid = conn.scalar(insert(mm.embedding_spaces).values(fingerprint=space.fingerprint,
                 config=space.model_dump(), status="ready", checkpoint={}).on_conflict_do_update(
                 index_elements=[mm.embedding_spaces.c.fingerprint], set_={"status": "ready"}).returning(mm.embedding_spaces.c.id))
@@ -315,11 +357,11 @@ async def index_semantic(db, scope, limit=64):
                 count += 1
             conn.execute(mm.embedding_spaces.update().where(mm.embedding_spaces.c.id == sid).values(
                 checkpoint={"indexed_last_batch": count, "updated_at": now_utc().isoformat()}))
-        db._memory_semantic_state = "semantic_local"
-        return {"indexed": count, "status": "semantic_local", "fingerprint":space.fingerprint}
+        db._memory_semantic_state = success
+        return {"indexed": count, "status": success, "fingerprint":space.fingerprint}
     except (httpx.HTTPError, OSError, ValueError, KeyError, TimeoutError):
-        db._memory_semantic_state = "local_unavailable"
-        return {"indexed": 0, "status": "local_unavailable"}
+        db._memory_semantic_state = failed
+        return {"indexed": 0, "status": failed}
 
 
 def _load_candidate_vectors(db, scope, fingerprint, *, memory_ids=None, chunk_ids=None):
@@ -377,7 +419,7 @@ def _projection_metadata(db, scope, fingerprint):
     return signature, [r[0] for r in memories], [r[0] for r in chunks]
 
 
-def _ann_candidates(db, scope, fingerprint, vector):
+def _ann_candidates(db, scope, fingerprint, vector, dimension=DIMENSION):
     from .ann import VectorIndex
     # Serialize native index construction/search and keep cache ownership on db.
     # Four scenes bound resident graph count. The LRU never owns source text.
@@ -394,7 +436,7 @@ def _ann_candidates(db, scope, fingerprint, vector):
             cache = db._memory_ann_cache = OrderedDict()
         cached = cache.get(key)
         if cached is None or cached[0] != signature:
-            indexes = (VectorIndex(), VectorIndex())
+            indexes = (VectorIndex(dimension), VectorIndex(dimension))
             # No MAX_POOL truncation: load and verify the entire eligible vector
             # projection in bounded pages, adding each page into the native graph.
             for start in range(0, max(len(memory_ids), len(chunk_ids)), _ANN_PAGE):
@@ -421,7 +463,7 @@ def _ann_candidates(db, scope, fingerprint, vector):
                 memory_ids=selected[0], chunk_ids=selected[1])
             if loaded is None:
                 return None
-            ranks = tuple(rank_vectors(vector, rows) for rows in loaded)
+            ranks = tuple(rank_vectors(vector, rows, dimension=dimension) for rows in loaded)
             if all(len(rank) >= 80 or count >= index.size
                    for rank, index in zip(ranks, indexes)):
                 return ranks
@@ -433,24 +475,29 @@ def _ann_candidates(db, scope, fingerprint, vector):
 
 
 async def semantic_candidates(db, scope, query):
-    if not _deployment(db) or not query.strip():
+    if not query.strip():
         return {}, {}
     # A failing service gets a short circuit breaker so voice/chat never queues a
     # fresh timeout for every turn. Worker indexing independently probes recovery.
     if time.monotonic() < getattr(db, "_memory_semantic_retry_at", 0):
         return {}, {}
+    source = "local"
     try:
         client = _client(db)
+        if client is None:
+            return {}, {}
+        source = getattr(db, "_memory_semantic_source", "local")
         vectors = await asyncio.wait_for(client.embed([query[:4096]], query=True), timeout=1.0)
         if len(vectors) != 1:
             raise ValueError("invalid query vector")
-        ranks = await asyncio.to_thread(_ann_candidates, db, scope, client.space.fingerprint, vectors[0])
+        space = client.space
+        ranks = await asyncio.to_thread(_ann_candidates, db, scope, space.fingerprint, vectors[0], space.dimension)
         if ranks is None:
-            db._memory_semantic_state = "local_pending"
+            db._memory_semantic_state = source + "_pending"
             return {}, {}
-        db._memory_semantic_state = "semantic_local"
+        db._memory_semantic_state = "semantic_" + source
         return dict(ranks[0]), dict(ranks[1])
     except (httpx.HTTPError, OSError, ValueError, KeyError, TimeoutError, ImportError, RuntimeError):
-        db._memory_semantic_state = "local_unavailable"
+        db._memory_semantic_state = source + "_unavailable"
         db._memory_semantic_retry_at = time.monotonic()+10
         return {}, {}

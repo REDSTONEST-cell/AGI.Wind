@@ -1,10 +1,11 @@
+import { messageIdentity } from './message-identity.js?v=20261028-group1';
 import { AgiWindClient, ApiError } from './sdk/api.js?v=20261027memberpool1';
 import { appendImages, messageImages } from './media.js?v=20261027a';
 import { cropAvatar } from './avatar-crop.js?v=20261027a';
 import { splitReply } from './reply-segments.js?v=20261027b';
 import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027autoplay1';
 import { createAgentPage } from './agent-settings.js?v=20261027e';
-import { createRealtimeCall } from './realtime-call.js?v=20261027-callfix1';
+import { createRealtimeCall } from './realtime-call.js?v=20261028-tailvoice1';
 import { bindMicrophoneSettings, microphoneError } from './microphone.js?v=20261027-mic1';
 import { createVoiceInput } from './voice-input.js?v=20261027-mic1';
 import { createQQPage } from './qq-settings.js?v=20261027qqdebounce1';
@@ -63,6 +64,7 @@ const state = {
   personaBytes: 0,
   memoryRevision: 0,
   memoryItems: [],
+  memoryVisible: 40,
   selectedMemoryId: null,
   memoryToken: 0,
   memoryQuery: '',
@@ -196,10 +198,10 @@ function formatLogTime(value) {
 }
 
 function stripHiddenReplyPrefix(value) {
-  return String(value || '').replace(
-    /^\s*[\[【]\s*(?:情绪\s*[:：][^\]】\n]{1,12}|开心|平静|难过|担心|撒娇|生气|惊讶|温柔|高兴|快乐|喜悦|悲伤|伤心|失落|害怕|焦虑|愤怒|不满|吃惊|意外|柔和|亲切)\s*[\]】]\s*/,
-    '',
-  );
+  return String(value || '')
+    .replace(/[\[【]\s*消息时间\s*[:：]?\s*\d{4}-\d{2}-\d{2}[^\]】\n]{0,70}[\]】]\s*/g, '')
+    .replace(/[\[【]\s*(?:(?:情绪|心情|表情包)\s*[:：][^\]】\n]{0,80}|表情包|开心|平静|难过|担心|撒娇|生气|惊讶|温柔|高兴|快乐|喜悦|悲伤|伤心|失落|害怕|焦虑|愤怒|不满|吃惊|意外|柔和|亲切)\s*[\]】]\s*/g, '')
+    .replace(/<\s*\/?\s*[|｜]+\s*DSML\s*[|｜]+[\s\S]*$/i, '');
 }
 
 function appendTermLine(line, { defer = false } = {}) {
@@ -907,6 +909,7 @@ function renderPage(name, { load = true } = {}) {
   if (!PAGES[name]) name = 'chat';
   if (name !== 'chat') void voiceInput?.cancel();
   closeMemoryDrawer();
+  closeMemoryListDrawer();
   $('#app').classList.toggle('chat-active',name==='chat');
   document.body.classList.toggle('chat-layout',name==='chat');
   state.currentPage = name;
@@ -1886,16 +1889,29 @@ async function updateLogAvatar() {
   }
 }
 
-function refreshMessageIdentity() {
-  $$('#messages .msg').forEach((node) => {
-    const assistant = node.getAttribute('data-role') === 'assistant';
-    const avatar = node.querySelector('.avatar');
-    const nameEl = node.querySelector('.msg-name');
-    if (avatar) paintAvatar(avatar, assistant ? (state.personaName || 'W') : (state.userName || '我'), assistant ? state.avatarAssetId : state.userAvatarAssetId);
-    if (nameEl) nameEl.textContent = assistant ? (state.personaName || 'AGI.Wind') : state.userName;
+function paintMessageIdentity(node) {
+  const identity = messageIdentity(node.dataset.role, node.dataset.group === 'true', node._senderInfo, {
+    name: state.personaName, userName: state.userName,
+    avatarAssetId: state.avatarAssetId, userAvatarAssetId: state.userAvatarAssetId,
   });
+  node.dataset.side = identity.side;
+  const avatar = node.querySelector('.avatar');
+  if (avatar) {
+    paintAvatar(avatar, identity.name, identity.assetId);
+    if (identity.avatarUrl) {
+      const image = el('img', {src:identity.avatarUrl, alt:identity.name, loading:'lazy', referrerpolicy:'no-referrer'});
+      image.addEventListener('error', () => {
+        if (image.parentNode === avatar) { avatar.classList.remove('has-image'); avatar.textContent = identity.name.slice(0,1); }
+      }, {once:true});
+      avatar.classList.add('has-image'); avatar.replaceChildren(image);
+    }
+  }
+  const name = node.querySelector('.msg-name');
+  if (name) name.textContent = identity.name;
 }
-
+function refreshMessageIdentity() {
+  $$('#messages .msg').forEach(paintMessageIdentity);
+}
 function updateChatIdentity() {
   const name = state.personaName || state.companionName || '她';
   $('#empty-title').textContent = name ? '开始和 ' + name + ' 说话' : '开始一段新的对话';
@@ -1931,7 +1947,7 @@ function messageNode(role, text, options = {}) {
   const assistant = role === 'assistant';
   const node = el('article', { class: 'msg' + (options.className ? ' ' + options.className : '') + (options.animate ? ' animate-in' : ''), 'data-role': role });
   const avatar = el('div', { class: 'avatar' });
-  paintAvatar(avatar, assistant ? (state.personaName || 'W') : (state.userName || '我'), assistant ? state.avatarAssetId : state.userAvatarAssetId);
+
   const name = assistant ? (state.personaName || 'AGI.Wind') : (options.name || state.userName);
   const meta = el('div', { class: 'msg-head' });
   if (name) meta.append(el('span', { class: 'msg-name', text: name }));
@@ -1941,6 +1957,9 @@ function messageNode(role, text, options = {}) {
   const bubble = el('div', { class: 'bubble' }, [body]);
   const bodyWrap = el('div', { class: 'msg-body' }, [meta, bubble]);
   node.append(avatar, bodyWrap);
+  node.dataset.group = String(options.group ?? (state.conversation?.channel_kind === 'group'));
+  node._senderInfo = options.sender || null;
+  paintMessageIdentity(node);
   const message={ node, bubble, body, meta };
   if(options.attachments?.length)messageImages(client,message,options.attachments);
   return message;
@@ -2342,7 +2361,7 @@ function startVoiceWatchSegments(generationId, controller) {
   tick();
 }
 
-function renderHistorySegments(container, event) {
+function renderHistorySegments(container, event, options = {}) {
   const content = event.content || {};
   const attachments = event.attachments || content.attachments || [];
   const segments = Array.isArray(content.segments) ? content.segments : [];
@@ -2358,7 +2377,7 @@ function renderHistorySegments(container, event) {
       const segmentId = String(segment.segment_id);
       const info = voices.get(segmentId) || {};
       const audio = audios.find((item) => String(item.segment_id || '') === segmentId);
-      const message = messageNode('assistant', '', {});
+      const message = messageNode('assistant', '', options);
       container.append(message.node);
       message.node.dataset.messageKind = 'audio';
       message.body.hidden = true;
@@ -2374,14 +2393,14 @@ function renderHistorySegments(container, event) {
         message.meta.append(el('span', { class: 'meta', text: '语音不可用，显示文字' }));
       }
     } else {
-      const message = messageNode('assistant', '', {});
+      const message = messageNode('assistant', '', options);
       message.body.innerHTML = renderMarkdown(segmentText);
       container.append(message.node);
     }
   }
   for (const attachment of images) {
     if (!attachment) continue;
-    const message = messageNode('assistant', '', {});
+    const message = messageNode('assistant', '', options);
     container.append(message.node);
     message.node.dataset.messageKind = 'image';
     message.body.hidden = true;
@@ -2453,7 +2472,7 @@ async function loadHistory() {
       if(!['user_input','assistant_output'].includes(event.kind))continue;
       if (event.content?.proactive && event.id) state.seenProactive.add(String(event.id));
       logHistoryProcessing(event);
-      const text = stripHiddenReplyPrefix(event.content && (event.content.text || ''));
+      const text = event.role === 'assistant' ? stripHiddenReplyPrefix(event.content?.text || '') : (event.content?.text || '');
       const attachments=event.attachments||event.content?.attachments||[];
       if (!text&&!attachments.length) continue;
       const role = event.role === 'assistant' ? 'assistant' : 'user';
@@ -2464,7 +2483,7 @@ async function loadHistory() {
         if(Array.isArray(segments)&&segments.length)renderHistorySegments($('#messages'),event);
         else{const turn=createReplyTurn($('#messages'),{time:event.recorded_at}).update(text,attachments);handleHistoryVoice(event,turn);}
       }
-      else appendMessage(role,text,{time:event.recorded_at,attachments,name:speaker});
+      else appendMessage(role,text,{time:event.recorded_at,attachments,name:speaker,sender});
     }
     showChatEmpty($('#messages').children.length === 0);
     scrollToEnd(true);
@@ -2711,12 +2730,12 @@ async function viewArchive(conversation) {
     for (const event of events) {
       if(!['user_input','assistant_output'].includes(event.kind))continue;
       logHistoryProcessing(event);
-      const text = event.content && (event.content.text || '');
+      const text = event.role === 'assistant' ? stripHiddenReplyPrefix(event.content?.text || '') : (event.content?.text || '');
       const attachments=event.attachments||event.content?.attachments||[];
       if (!text&&!attachments.length) continue;
       const role = event.role === 'assistant' ? 'assistant' : 'user';
-      if(role==='assistant'){const turn=createReplyTurn(box,{time:event.recorded_at}).update(text,attachments);handleHistoryVoice(event,turn);}
-      else { appendChatTime(box, event.recorded_at); box.append(messageNode(role,text,{time:event.recorded_at,attachments}).node); }
+      if(role==='assistant'){const turn=createReplyTurn(box,{time:event.recorded_at,group:conversation.channel_kind==='group'}).update(text,attachments);handleHistoryVoice(event,turn);}
+      else { appendChatTime(box, event.recorded_at); box.append(messageNode(role,text,{time:event.recorded_at,attachments,sender:event.sender_info,group:conversation.channel_kind==='group'}).node); }
     }
     if (!box.children.length) box.append(el('p', { class: 'hint', text: '这段对话还没有可显示的消息。' }));
     $('#archive-view').hidden = false;
@@ -3240,8 +3259,121 @@ async function loadMemoryExtractorChip() {
   }
 }
 
+/* 记忆条目抽屉：长列表不再撑高页面。服务端 /memory/items 只支持 limit（上限 200），
+   没有 offset/cursor，因此一次取回前 200 条，再在前端分批渲染并提供“加载更多”。 */
+const MEMORY_FETCH_LIMIT = 200;
+const MEMORY_PAGE_SIZE = 40;
+let memoryListScrollLock = null;
+
+function openMemoryListDrawer({ focus = true } = {}) {
+  const drawer = $('#memory-list-drawer');
+  const backdrop = $('#memory-list-backdrop');
+  if (!drawer || !backdrop) return;
+  // 与“记忆工具”抽屉相同：页面入场动画会给 fixed 子元素创建 containing block，
+  // 打开时把遮罩和抽屉挂到 body 根节点，关闭后仍留在 body。
+  if (drawer.parentElement !== document.body) document.body.append(backdrop, drawer);
+  if (drawer.hidden) {
+    if (!$('#memory-drawer')?.hidden) closeMemoryDrawer();
+    memoryListScrollLock = { workspace: document.querySelector('.workspace'), top: document.querySelector('.workspace')?.scrollTop || 0 };
+    document.body.classList.add('memory-list-open');
+    drawer.hidden = false;
+    backdrop.hidden = false;
+    requestAnimationFrame(() => drawer.classList.add('open'));
+  }
+  if (focus) $('#memory-list-close')?.focus({preventScroll:true});
+}
+
+function closeMemoryListDrawer() {
+  const drawer = $('#memory-list-drawer');
+  const backdrop = $('#memory-list-backdrop');
+  if (!drawer || drawer.hidden) return;
+  drawer.classList.remove('open');
+  document.body.classList.remove('memory-list-open');
+  setTimeout(() => {
+    if (drawer.classList.contains('open')) return;
+    drawer.hidden = true;
+    if (backdrop) backdrop.hidden = true;
+    closeMemoryDetail({ focus: false });
+    if (memoryListScrollLock?.workspace) memoryListScrollLock.workspace.scrollTop = memoryListScrollLock.top;
+    memoryListScrollLock = null;
+    if (drawer.contains(document.activeElement)) $('#memory-list-open')?.focus({preventScroll:true});
+  }, 220);
+}
+
+function showMemoryDetail(show) {
+  const detail = $('#memory-detail');
+  if (!detail) return;
+  detail.hidden = !show;
+  if (show) {
+    detail.classList.add('open');
+    const body = $('#memory-detail-body');
+    if (body) body.scrollTop = 0;
+  } else {
+    detail.classList.remove('open');
+  }
+}
+
+function closeMemoryDetail({ focus = true } = {}) {
+  const selectedId = state.selectedMemoryId;
+  state.selectedMemoryId = null;
+  showMemoryDetail(false);
+  markSelectedMemoryCard();
+  if (focus) {
+    const target = $$('#memories .memory-item').find((node) => node.dataset.memoryId === selectedId)
+      || $('#memories .memory-item')
+      || $('#memory-list-close');
+    target?.focus({preventScroll:true});
+  }
+}
+
+function updateMemoryCount() {
+  const items = state.memoryItems || [];
+  let text = '';
+  if (items.length) {
+    text = '共 ' + items.length + ' 条';
+    if (items.length >= MEMORY_FETCH_LIMIT) text = '已加载前 ' + items.length + ' 条（更多请用搜索缩小范围）';
+  }
+  const overview = $('#memory-count');
+  const drawerCount = $('#memory-list-count');
+  if (overview) overview.textContent = text;
+  if (drawerCount) drawerCount.textContent = text;
+}
+
+function updateMemoryLoadMore() {
+  const wrap = $('#memory-load-more');
+  const button = $('#memory-load-more-button');
+  const hint = $('#memory-load-more-hint');
+  if (!wrap || !button || !hint) return;
+  const total = state.memoryItems.length;
+  const remaining = Math.max(0, total - state.memoryVisible);
+  if (!total || remaining === 0) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  button.textContent = '加载更多（剩余 ' + remaining + ' 条）';
+  hint.textContent = '已显示 ' + Math.min(state.memoryVisible, total) + ' / ' + total + ' 条；也可以直接搜索缩小范围。';
+}
+
+function loadMemoryMore() {
+  if (!state.memoryItems.length) return;
+  const scroll = $('#memory-list-scroll');
+  const top = scroll?.scrollTop || 0;
+  const wrap = $('#memory-load-more');
+  const hadFocus = wrap?.contains(document.activeElement);
+  state.memoryVisible = Math.min(state.memoryVisible + MEMORY_PAGE_SIZE, state.memoryItems.length);
+  renderMemoryList(state.memoryItems);
+  if (scroll) scroll.scrollTop = top;
+  updateMemoryLoadMore();
+  if (hadFocus && wrap?.hidden) {
+    const items = $$('#memories .memory-item');
+    items[items.length - 1]?.focus({preventScroll:true});
+  }
+}
+
 async function loadMemoryPage() {
   if (!state.companionId) return;
+  state.memoryVisible = MEMORY_PAGE_SIZE;
   $('#memory-query').value = state.memoryQuery;
   $('#memory-kind').value = state.memoryKind;
   $('#memory-status').value = state.memoryStatus;
@@ -3394,13 +3526,14 @@ async function loadMemoryItems() {
   hint.textContent = '';
   try {
     const items = await client.memoryItems(state.companionId, {
-      q: state.memoryQuery, kind: state.memoryKind, status: state.memoryStatus, sort: state.memorySort, limit: 100,
+      q: state.memoryQuery, kind: state.memoryKind, status: state.memoryStatus, sort: state.memorySort, limit: MEMORY_FETCH_LIMIT,
       pool: state.memoryPool === 'all' ? '' : state.memoryPool,
       roomId: state.memoryRoom,
     });
     if (token !== state.memoryToken) return;
     state.memoryItems = items;
-    $('#memory-count').textContent = items.length ? '共 ' + items.length + ' 条' : '';
+    state.memoryVisible = Math.min(Math.max(state.memoryVisible || MEMORY_PAGE_SIZE, MEMORY_PAGE_SIZE), Math.max(items.length, MEMORY_PAGE_SIZE));
+    updateMemoryCount();
     const roomTitle = state.memoryRooms.find((room) => room.binding_id === state.memoryRoom)?.title;
     const poolLabel = state.memoryPool === 'member' ? '群成员记忆' : state.memoryPool === 'owner' ? '主人记忆' : '';
     const filters = [poolLabel, roomTitle && '群：' + roomTitle, state.memoryQuery && '“' + state.memoryQuery + '”', state.memoryKind && MEMORY_KIND_LABELS[state.memoryKind], MEMORY_STATUS_LABELS[state.memoryStatus]].filter(Boolean);
@@ -3408,12 +3541,13 @@ async function loadMemoryItems() {
     renderMemoryList(items);
     if (!items.length) {
       state.selectedMemoryId = null;
-      $('#memory-detail').hidden = true;
+      showMemoryDetail(false);
     }
   } catch (error) {
     if (token !== state.memoryToken) return;
     hint.textContent = '读取失败：' + error.message;
     list.replaceChildren(el('li', { class: 'memory-empty', text: '读取失败，请稍后重试。' }));
+    updateMemoryLoadMore();
     logEvent('error', '记忆列表读取失败', error.message);
   }
 }
@@ -3425,9 +3559,12 @@ function renderMemoryList(items) {
       ? '没有匹配的记忆。试试更短的关键词，或切换状态筛选。'
       : '还没有长期记忆。先聊几轮，提炼任务完成后会自动出现在这里。';
     list.replaceChildren(el('li', { class: 'memory-empty', text }));
+    updateMemoryLoadMore();
     return;
   }
-  list.replaceChildren(...items.map(renderMemoryItem));
+  list.replaceChildren(...items.slice(0, state.memoryVisible).map(renderMemoryItem));
+  updateMemoryLoadMore();
+  markSelectedMemoryCard();
 }
 
 function renderMemoryItem(item) {
@@ -3474,9 +3611,12 @@ function markSelectedMemoryCard() {
 async function openMemoryDetail(memoryId) {
   try {
     const detail = await client.memoryItem(memoryId);
+    const wasHidden = $('#memory-detail')?.hidden !== false;
     state.selectedMemoryId = memoryId;
+    openMemoryListDrawer({ focus: false });
     renderMemoryDetail(detail);
     markSelectedMemoryCard();
+    if (wasHidden) $('#memory-detail-back')?.focus({preventScroll:true});
   } catch (error) {
     toast('读取记忆详情失败：' + error.message);
     logEvent('error', '记忆详情读取失败', error.message);
@@ -3484,7 +3624,7 @@ async function openMemoryDetail(memoryId) {
 }
 
 function renderMemoryDetail(memory) {
-  $('#memory-detail').hidden = false;
+  showMemoryDetail(true);
   const body = $('#memory-detail-body');
   body.replaceChildren();
   body.append(el('p', { class: 'memory-detail-content', text: memory.content }));
@@ -3631,8 +3771,7 @@ async function toggleMemoryStatus(item, status) {
     logEvent('system', status === 'hidden' ? '记忆已隐藏' : '记忆已恢复', item.content.slice(0, 80));
     await Promise.all([loadMemoryItems(), loadMemoryJobs()]);
     if (status === 'hidden' && state.selectedMemoryId === item.id) {
-      state.selectedMemoryId = null;
-      $('#memory-detail').hidden = true;
+      closeMemoryDetail({ focus: false });
     }
     if (status === 'active' && state.selectedMemoryId === item.id) await openMemoryDetail(item.id);
   } catch (error) {
@@ -4606,22 +4745,26 @@ function bind() {
     state.memorySort = $('#memory-sort').value;
     state.memoryPool = $('#memory-pool').value;
     state.memoryRoom = $('#memory-room').value;
+    state.memoryVisible = MEMORY_PAGE_SIZE;
     logEvent('chat', '记忆筛选', [state.memoryQuery, MEMORY_KIND_LABELS[state.memoryKind], MEMORY_STATUS_LABELS[state.memoryStatus]].filter(Boolean).join(' · ') || '全部记忆');
     loadMemoryItems();
   });
   $('#memory-sort').addEventListener('change', () => {
     state.memorySort = $('#memory-sort').value;
+    state.memoryVisible = MEMORY_PAGE_SIZE;
     loadMemoryItems();
   });
   $('#memory-pool').addEventListener('change', () => {
     state.memoryPool = $('#memory-pool').value;
     state.memoryRoom = '';
     $('#memory-room').value = '';
+    state.memoryVisible = MEMORY_PAGE_SIZE;
     syncMemoryRoomVisibility();
     loadMemoryItems();
   });
   $('#memory-room').addEventListener('change', () => {
     state.memoryRoom = $('#memory-room').value;
+    state.memoryVisible = MEMORY_PAGE_SIZE;
     loadMemoryItems();
   });
   $('#memory-recall-form').addEventListener('submit', runRecallTest);
@@ -4642,19 +4785,28 @@ function bind() {
   $('#memory-tools-open').addEventListener('click', openMemoryDrawer);
   $('#memory-drawer-close').addEventListener('click', closeMemoryDrawer);
   $('#memory-drawer-backdrop').addEventListener('click', closeMemoryDrawer);
+  $('#memory-list-open').addEventListener('click', () => openMemoryListDrawer());
+  $('#memory-list-close').addEventListener('click', closeMemoryListDrawer);
+  $('#memory-list-backdrop').addEventListener('click', closeMemoryListDrawer);
+  $('#memory-load-more-button').addEventListener('click', loadMemoryMore);
+  $('#memory-detail-back').addEventListener('click', () => closeMemoryDetail());
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && !$('#memory-drawer').hidden) closeMemoryDrawer();
+    if (event.key !== 'Escape') return;
+    if (!$('#memory-edit').hidden) return;
+    const listDrawer = $('#memory-list-drawer');
+    if (listDrawer && !listDrawer.hidden) {
+      if (!$('#memory-detail').hidden) closeMemoryDetail();
+      else closeMemoryListDrawer();
+      return;
+    }
+    if (!$('#memory-drawer').hidden) closeMemoryDrawer();
   });
   $('#memory-refresh').addEventListener('click', loadMemoryPage);
   const usageRefresh = $('#usage-refresh');
   if (usageRefresh) usageRefresh.addEventListener('click', refreshUsageStats);
   $('#memory-jobs-refresh').addEventListener('click', loadMemoryJobs);
   $('#memory-extract-now').addEventListener('click', extractMemoryNow);
-  $('#memory-detail-close').addEventListener('click', () => {
-    state.selectedMemoryId = null;
-    $('#memory-detail').hidden = true;
-    markSelectedMemoryCard();
-  });
+  $('#memory-detail-close').addEventListener('click', () => closeMemoryDetail());
   $('#apply-correction').addEventListener('click', applyCorrection);
   $('#cancel-correction').addEventListener('click', closeCorrection);
   $('#memory-edit').addEventListener('click', (event) => { if (event.target === $('#memory-edit')) closeCorrection(); });
