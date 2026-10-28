@@ -1,6 +1,6 @@
 import json
 from collections import Counter
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from .chunking import estimate_tokens
 from .retrieval import MemoryService
 from .semantic import active_clause, item_scope, verified_refs, chunk_query, chunk_valid
@@ -15,6 +15,12 @@ from ..core.errors import AppError
 
 DEFAULT_TOTAL_BUDGET = 48000
 DEFAULT_INPUT_BUDGET = 12000
+RECENT_LIMIT = 40
+RECENT_BUDGET = 4000
+# Group rooms are read as a shared timeline: more messages, each one bounded.
+GROUP_RECENT_LIMIT = 100
+GROUP_RECENT_BUDGET = 16000
+GROUP_MESSAGE_CHARS = 600
 
 
 def check_current_input(text, token_count=estimate_tokens, budget=DEFAULT_INPUT_BUDGET):
@@ -37,9 +43,11 @@ def select_memories(hits, token_count=estimate_tokens, budget=3000):
 
 
 class ContextBuilder:
-    def __init__(self, db, token_count=estimate_tokens, total_budget=DEFAULT_TOTAL_BUDGET, input_budget=DEFAULT_INPUT_BUDGET):
+    def __init__(self, db, token_count=estimate_tokens, total_budget=DEFAULT_TOTAL_BUDGET, input_budget=DEFAULT_INPUT_BUDGET,
+                 group_recent_limit=GROUP_RECENT_LIMIT):
         self.db, self.token_count = db, token_count
         self.total_budget, self.input_budget = total_budget, input_budget
+        self.group_recent_limit = max(1, int(group_recent_limit or GROUP_RECENT_LIMIT))
 
     async def build(self, scope, current_input, model_ref, current_request_id=None):
         with self.db.engine.connect() as conn: initial_revision=authorize(conn,scope,scope.companion_id)["memory_revision"]
@@ -66,15 +74,23 @@ class ContextBuilder:
                              m.external_principals.c.is_owner.label("sender_is_owner"))
                 .outerjoin(m.external_principals, m.events.c.sender_principal_id == m.external_principals.c.id)
                 .where(m.events.c.companion_id == scope.companion_id, m.events.c.account_id == scope.account_id, m.events.c.conversation_id == scope.conversation_id, m.events.c.visibility == "visible"))
-            if current_request_id: query = query.where(m.events.c.request_id != current_request_id)
-            rows = conn.execute(query.order_by(m.events.c.recorded_at.desc()).limit(40)).mappings()
+            # Observed group messages and other request-less events have a NULL
+            # request id; a bare != would silently drop them from the timeline.
+            if current_request_id: query = query.where(or_(m.events.c.request_id.is_(None),
+                                                           m.events.c.request_id != current_request_id))
+            recent_limit = self.group_recent_limit if group_scene else RECENT_LIMIT
+            recent_budget = GROUP_RECENT_BUDGET if group_scene else RECENT_BUDGET
+            query = query.where(m.events.c.role.in_(("user", "assistant")))
+            rows = conn.execute(query.order_by(m.events.c.recorded_at.desc()).limit(recent_limit)).mappings()
             recent_cost = 0
             for row in rows:
-                if row['role'] not in ('user', 'assistant'): continue
-                content = {'text':row['content'].get('text', '')}
+                text = row['content'].get('text', '')
+                if group_scene and len(text) > GROUP_MESSAGE_CHARS:
+                    text = text[:GROUP_MESSAGE_CHARS] + "…"
+                content = {'text':text}
                 if row['content'].get('attachments'): content['attachments'] = row['content']['attachments']
                 cost = self.token_count(json.dumps(content, ensure_ascii=False))
-                if recent_cost + cost > 4000 or used + cost > self.total_budget: break
+                if recent_cost + cost > recent_budget or used + cost > self.total_budget: break
                 entry = {"event_id": str(row["id"]), "role": row["role"], "content": content, "recorded_at": row["recorded_at"].isoformat()}
                 if group_scene and row["role"] == "user":
                     entry["speaker"] = speaker_label(None, {"card_name": row["sender_card"], "display_name": row["sender_name"],

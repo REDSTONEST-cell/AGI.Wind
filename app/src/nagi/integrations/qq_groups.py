@@ -13,6 +13,7 @@ from sqlalchemy import select, update
 from ..archive import models as m
 from ..archive.repository import lock
 from ..identity.service import authorize
+from .qq_quotes import STRING_SEGMENT_TYPES, normalize_segments, reply_segment_target
 
 logger = logging.getLogger("nagi.qq")
 
@@ -46,9 +47,7 @@ def group_message(data, settings):
                 return None
         except (TypeError, ValueError):
             return None
-    segments = data.get("message")
-    if isinstance(segments, str):
-        segments = [{"type": "text", "data": {"text": segments}}]
+    segments = normalize_segments(data.get("message"), STRING_SEGMENT_TYPES)
     if not isinstance(segments, list) or len(segments) > _MAX_SEGMENTS:
         return None
     text, images, image_files, records, mentioned, reply_to = [], [], [], [], [], None
@@ -72,10 +71,8 @@ def group_message(data, settings):
             target = _sender_id(value.get("qq"))
             if target:
                 mentioned.append(target)
-        elif kind == "reply":
-            target = str(value.get("id") or "").strip()
-            if target:
-                reply_to = target
+        elif kind == "reply" and reply_to is None:
+            reply_to = reply_segment_target(value)
     joined = "".join(text).strip()
     if len(joined) > _MAX_TEXT or (not joined and not images and not image_files and not records) or sender_qq == bot_qq:
         return None

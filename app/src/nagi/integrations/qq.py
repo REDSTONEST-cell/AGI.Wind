@@ -43,6 +43,8 @@ from .qq_actions import (CatchupDeduper, PokeRateLimiter, QQAccountSettings, TOK
                          poke_target, recall_payload, resolve_accounts,
                          token_ref_for, with_quote)
 from .qq_debounce import QQDebouncer, config_from_policy
+from .qq_quotes import (STRING_SEGMENT_TYPES, normalize_segments, prefix_quote, quote_line, reply_segment_target,
+                        reply_target, segments_text, strip_quote_prefix)
 
 logger = logging.getLogger('nagi.qq')
 WS_PATH = '/api/v1/integrations/qq/ws'
@@ -75,6 +77,9 @@ class QQSettings(DTO):
     group_trigger_mode: Literal['mention', 'smart'] = 'smart'
     followup_seconds: int = Field(default=90, ge=10, le=600)
     followup_max_rounds: int = Field(default=4, ge=1, le=20)
+    # How many recent group messages (including ones not addressed to her) the
+    # reply model reads to follow the room's conversation.
+    group_context_messages: int = Field(default=100, ge=10, le=200)
     # Multi-account: each account owns its bot/owner/groups/token. An empty list
     # keeps the single-account fields above authoritative (compatibility).
     accounts: list[QQAccountSettings] = Field(default_factory=list, max_length=20)
@@ -169,13 +174,14 @@ def private_message(data, settings):
         try:
             if abs(time.time()-float(data['time'])) > 300: return None
         except (ValueError, TypeError): return None
-    segments=data.get('message')
+    segments=normalize_segments(data.get('message'),STRING_SEGMENT_TYPES)
     if not isinstance(segments,list) or len(segments)>64: return None
-    text, images, image_files, records = [], [], [], []
+    text, images, image_files, records, reply_to = [], [], [], [], None
     for part in segments:
         if not isinstance(part,dict) or not isinstance(part.get('data'),dict): continue
         value=part['data']
         if part.get('type')=='text': text.append(str(value.get('text','')))
+        elif part.get('type')=='reply' and reply_to is None: reply_to=reply_segment_target(value)
         elif part.get('type')=='image' and len(images)+len(image_files)<4:
             url=value.get('url')
             if isinstance(url,str) and len(url)<=4000: images.append(url)
@@ -188,6 +194,7 @@ def private_message(data, settings):
     if len(text)>12000 or (not text and not images and not image_files and not records): return None
     return {'text':text,'images':images,'image_files':image_files,'records':records,
             'platform_message_id':str(data['message_id']),
+            'reply_to_platform_message_id':reply_to,
             'account_id':account.account_id,'bot_qq':account.bot_qq,'owner_qq':account.owner_qq,
             'request_id':request_id_for(account.bot_qq,data['message_id'])}
 
@@ -718,10 +725,15 @@ class QQBridge:
             messages=message.get('messages') if isinstance(message.get('messages'),list) else [message]
             prepared=[]
             for item in messages:
-                prepared.append(await self._prepare_input(sender,item))
+                value,ids=await self._prepare_input(sender,item)
+                quote=await self._quote_line(sender,item,account=account,
+                    conversation_id=policy.conversation_id,sender_qq=account.owner_qq)
+                prepared.append((prefix_quote(value,quote),ids))
             text='\n'.join(value for value,_ in prepared if value.strip())
             asset_ids=list(dict.fromkeys(asset_id for _,values in prepared for asset_id in values))
-            voice_mode=('always' if any(item.get('records') for item in messages) or '语音' in text else 'auto')
+            # Quoted words never switch the reply to voice; only the owner's own words do.
+            voice_mode=('always' if any(item.get('records') for item in messages)
+                        or any('语音' in str(item.get('text') or '') for item in messages) else 'auto')
             request=ChatRequest(request_id=messages[0].get('request_id') or message['request_id'],
                 conversation_id=policy.conversation_id,
                 input={'text':text,'asset_ids':asset_ids},output={'voice':voice_mode},
@@ -793,11 +805,15 @@ class QQBridge:
             room_key=str(binding['id'])
             text,asset_ids=await self._prepare_input(sender,message)
             message={**message,'text':text}
+            # The model reads what was quoted; attention still sees only the
+            # member's own words so quoted text cannot trigger a reply.
+            quote=await self._quote_line(sender,message,account=account,conversation_id=conversation_id,
+                binding_id=binding['id'],sender_qq=message['sender_qq'])
             occurred_at=None
             if message.get('occurred_at') is not None:
                 occurred_at=datetime.fromtimestamp(float(message['occurred_at']),tz=timezone.utc)
             event=self.service.archive.record_external_message(self.actor, conversation_id,
-                text=message['text'], asset_ids=asset_ids,
+                text=prefix_quote(message['text'],quote), asset_ids=asset_ids,
                 sender_principal_id=principal['id'] if principal else None,
                 external_message_id=message['platform_message_id'],
                 reply_to_external_id=message.get('reply_to_platform_message_id'), occurred_at=occurred_at)
@@ -1054,6 +1070,92 @@ class QQBridge:
             asset_ids.append(asset['id'])
         return text,asset_ids
 
+    async def _quote_line(self, connection, message, *, account, conversation_id, sender_qq, binding_id=None):
+        """Render the message this one quotes, or ''. Never fails the reply."""
+        target=reply_target(message.get('reply_to_platform_message_id'))
+        if not target: return ''
+        quote=None
+        try:
+            quote=self._archived_quote(account,conversation_id,binding_id,target,sender_qq)
+        except Exception:
+            logger.debug('qq quote archive lookup failed', exc_info=True)
+        if quote is None and connection is not None and getattr(connection,'connected',False):
+            quote=await self._fetched_quote(connection,account,target,sender_qq)
+        if quote is None:
+            # Still tell the model this is a reply, even when the original is gone.
+            quote={'origin':'other','speaker':'','text':''}
+        return quote_line(**quote)
+
+    def _archived_quote(self, account, conversation_id, binding_id, target, sender_qq):
+        from ..memory.access import speaker_label
+        with self.service.db.engine.connect() as conn:
+            row=None
+            if conversation_id is not None:
+                row=conn.execute(select(m.events.c.content,m.external_principals.c.card_name,
+                    m.external_principals.c.display_name,m.external_principals.c.external_user_id)
+                    .select_from(m.events.outerjoin(m.external_principals,
+                        m.events.c.sender_principal_id==m.external_principals.c.id))
+                    .where(m.events.c.account_id==self.actor.account_id,
+                           m.events.c.conversation_id==conversation_id,
+                           m.events.c.external_message_id==target)).mappings().first()
+            if row is not None:
+                external=str(row['external_user_id'] or '')
+                return {'origin':'self' if external and external==str(sender_qq) else 'other',
+                        'speaker':speaker_label(None,row) if external else '',
+                        'text':str((row['content'] or {}).get('text') or '')}
+            if binding_id is not None:
+                receipt=conn.execute(select(m.qq_message_receipts.c.generation_id,
+                    m.qq_message_receipts.c.segment_index).where(
+                    m.qq_message_receipts.c.binding_id==binding_id,
+                    m.qq_message_receipts.c.platform_message_id==target)).mappings().first()
+                if receipt is not None and receipt['generation_id'] is not None:
+                    content=conn.scalar(select(m.events.c.content).where(
+                        m.events.c.generation_id==receipt['generation_id'],
+                        m.events.c.role=='assistant')) or {}
+                    return {'origin':'bot','speaker':'','text':self._segment_text(content,receipt['segment_index'])}
+                return None
+            # Private: the owner's own messages are archived under their request id.
+            content=conn.scalar(select(m.events.c.content).where(
+                m.events.c.account_id==self.actor.account_id,
+                m.events.c.conversation_id==conversation_id,
+                m.events.c.request_id==request_id_for(account.bot_qq,target),
+                m.events.c.role=='user'))
+            if content is not None:
+                return {'origin':'self','speaker':'','text':str(content.get('text') or '')}
+        return None
+
+    @staticmethod
+    def _segment_text(content, index):
+        segments=sorted(content.get('segments') or [],key=lambda item:item.get('index',0))
+        if segments and 0<=int(index or 0)<len(segments):
+            return str(segments[int(index or 0)].get('text') or '')
+        parts=[text for text,_ in split_reply(str(content.get('text') or ''))]
+        if parts and 0<=int(index or 0)<len(parts):
+            return parts[int(index or 0)]
+        return str(content.get('text') or '')
+
+    async def _fetched_quote(self, connection, account, target, sender_qq):
+        """Ask OneBot for a quoted message the archive does not have."""
+        try:
+            message_id=int(target) if target.lstrip('-').isdigit() else target
+            payload=await asyncio.wait_for(connection.call('get_msg',{'message_id':message_id}),timeout=5)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.info('qq quoted message unavailable message=%s',target)
+            return None
+        if not isinstance(payload,dict): return None
+        sender=payload.get('sender') if isinstance(payload.get('sender'),dict) else {}
+        user_id=str(sender.get('user_id') or payload.get('user_id') or '')
+        segments=normalize_segments(payload.get('message'))
+        if segments is None: segments=normalize_segments(payload.get('raw_message'))
+        text=strip_quote_prefix(segments_text(segments or []))[:4000]
+        if user_id and user_id==account.bot_qq: origin='bot'
+        elif user_id and user_id==str(sender_qq): origin='self'
+        else: origin='other'
+        speaker=str(sender.get('card') or sender.get('nickname') or user_id or '')[:40]
+        return {'origin':origin,'speaker':speaker,'text':text}
+
     async def _reply_content(self):
         # Text generation ends before background TTS. Wait only for this turn,
         # bounded and cancellable; failed/slow speech still delivers the text.
@@ -1104,6 +1206,7 @@ def install_qq_routes(app,settings,store,service,assets,actor,authenticate,wakeu
     bridge=QQBridge(app,settings,store,service,assets,actor,wakeup)
     app.state.qq_bridge=bridge
     service.qq_bridge=bridge
+    service.group_context_limit=lambda: settings.qq.group_context_messages
 
     @app.get('/api/v1/integrations/qq')
     async def status(current=Depends(authenticate)):

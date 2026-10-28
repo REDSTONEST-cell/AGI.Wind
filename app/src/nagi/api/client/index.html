@@ -981,6 +981,9 @@
                 <label class="field"><span>接话有效期（秒）</span><input class="input" id="qq-followup-seconds" type="number" min="10" max="600" step="5" value="90"></label>
                 <label class="field"><span>每个话题最多接话轮次</span><input class="input" id="qq-followup-rounds" type="number" min="1" max="20" step="1" value="4"></label>
               </div>
+              <div class="grid-2">
+                <label class="field"><span>群聊上下文消息数</span><input class="input" id="qq-group-context" type="number" min="10" max="200" step="10" value="100"><small>回复时读取本群最近多少条消息（包括没有@她的），用来理解正在聊的话题</small></label>
+              </div>
               <p class="meta">保存时绑定网页当前对话；QQ 中发送 /stop 可停止当前回答和待发送消息。群聊第一批只保存@、引用与短时追问；其他群消息只作为上下文观察，不调用模型。</p>
               <div class="qq-group-windows" id="qq-group-windows" hidden>
                 <p class="meta"><strong>已接入的群窗口</strong>（每个群独立启停；关闭后该群消息不再触发回复和成员记忆）</p>

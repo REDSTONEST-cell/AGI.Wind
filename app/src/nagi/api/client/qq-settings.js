@@ -37,6 +37,7 @@ export function createQQPage(client, getConversation, openWindow = null) {
     $('#qq-group-trigger').value = value.group_trigger_mode || 'smart';
     $('#qq-followup-seconds').value = value.followup_seconds || 90;
     $('#qq-followup-rounds').value = value.followup_max_rounds || 4;
+    $('#qq-group-context').value = value.group_context_messages || 100;
     $('#qq-conversation').textContent = value.conversation_id ? '已绑定对话；归档后需重新绑定' : '保存时绑定网页当前对话';
   }
 
@@ -139,6 +140,7 @@ export function createQQPage(client, getConversation, openWindow = null) {
         group_trigger_mode:$('#qq-group-trigger').value,
         followup_seconds:Number($('#qq-followup-seconds').value),
         followup_max_rounds:Number($('#qq-followup-rounds').value),
+        group_context_messages:Number($('#qq-group-context').value) || 100,
         conversation_id:getConversation()?.id || policy?.conversation_id || null};
       const token = $('#qq-token').value.trim();
       if (token) body.token = token;
