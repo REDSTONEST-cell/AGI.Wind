@@ -11,8 +11,8 @@ from agi_wind.integrations.qq import QQSettings, TOKEN_REF
 from agi_wind.integrations.qq_groups import ensure_group_binding
 from agi_wind.providers.protocol import ProviderChunk
 
-BOT = "334193096"
-OWNER = "3548782171"
+BOT = "10002"
+OWNER = "10001"
 GROUP = "123456789"
 
 

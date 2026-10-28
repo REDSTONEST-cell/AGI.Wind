@@ -17,8 +17,8 @@ from agi_wind.memory.jobs import (MEMBER_EXTRACT, _load_batch, _load_member_batc
 from agi_wind.memory.members import MemberMemoryWriter
 from agi_wind.memory.retrieval import MemoryService
 
-BOT = "334193096"
-OWNER = "3548782171"
+BOT = "10002"
+OWNER = "10001"
 GROUP = "123456789"
 
 

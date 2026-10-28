@@ -9,10 +9,10 @@ from agi_wind.integrations.qq_groups import group_message
 
 
 def test_voice_only_private_and_group_messages_are_accepted():
-    settings = QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096',
+    settings = QQSettings(enabled=True, owner_qq='10001', bot_qq='10002',
                           conversation_id=uuid4(), group_enabled=True)
     event = dict(post_type='message', message_type='private', sub_type='friend',
-                 self_id=334193096, user_id=3548782171, message_id=-8,
+                 self_id=10002, user_id=10001, message_id=-8,
                  message=[{'type': 'record', 'data': {'file': 'cached-record'}}])
     parsed = private_message(event, settings)
     assert parsed and parsed['records'] == ['cached-record']

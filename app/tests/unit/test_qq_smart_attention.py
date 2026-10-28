@@ -27,7 +27,7 @@ MODEL = ModelRef(provider_id='fake', model_id='test', parameters={'tools': ['ign
 async def test_strong_signals_and_known_participant_followup_are_free_but_other_members_are_not():
     attention = GroupAttention(); attention.mark_replied('room-1', 'member-1')
     provider = Classifier()
-    for msg in [message(mentioned_qq_ids=['334193096']), message(reply_to_platform_message_id='9'), message('那后来呢')]:
+    for msg in [message(mentioned_qq_ids=['10002']), message(reply_to_platform_message_id='9'), message('那后来呢')]:
         result = await attention.decide_smart(msg, receipt_exists=True, provider=provider, model=MODEL)
         assert result.action == 'reply'
     assert not provider.calls
@@ -68,7 +68,7 @@ async def test_nonparticipants_without_cues_and_closed_windows_never_classify():
     attention.mark_replied('room-1', 'member-1')
     for msg, mode in [(message('下午三点', sender_principal_id='member-2'), 'smart'),
                       (message('下午三点'), 'mention'),
-                      (message('你好', anonymous=True, mentioned_qq_ids=['334193096']), 'smart')]:
+                      (message('你好', anonymous=True, mentioned_qq_ids=['10002']), 'smart')]:
         assert (await attention.decide_smart(msg, trigger_mode=mode, provider=provider, model=MODEL)).action == 'observe'
     attention.mark_replied('room-1', 'member-1')
     assert (await attention.decide_smart(message('下午三点'), provider=provider, model=MODEL)).reason == 'rounds_exhausted'

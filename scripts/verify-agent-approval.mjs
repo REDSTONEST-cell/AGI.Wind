@@ -27,7 +27,7 @@ const mock = `(() => {
   window.fetch = async (input, init = {}) => {
     const url = String(input && input.url ? input.url : input);
     if (url.includes('/api/v1/agent/approvals') && (!init.method || init.method === 'GET')) {
-      return json({ items: [{ id: 'synthetic-approval', generation_id: 'synthetic-generation', operation: 'list_files', details: { path: 'C:/Users/wind/Desktop' }, created_at: new Date().toISOString() }] });
+      return json({ items: [{ id: 'synthetic-approval', generation_id: 'synthetic-generation', operation: 'list_files', details: { path: 'C:/path/to/workspace' }, created_at: new Date().toISOString() }] });
     }
     if (url.includes('/api/v1/agent/approvals/synthetic-approval') && init.method === 'POST') {
       window.__decisions.push(JSON.parse(init.body));

@@ -21,7 +21,7 @@ async def setup_task(db,actor,scope,factory,tmp_path,script):
     provider=cognition(script=script)
     settings=active_settings(max_per_day=10,after_reply_media_enabled=False)
     settings.data_dir=tmp_path
-    settings.qq=QQSettings(enabled=True,owner_qq='3548782171',bot_qq='334193096',
+    settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',
                             conversation_id=scope.conversation_id,reply_delay_seconds=0)
     service,proactive,idle=make_service(db,provider,settings,clock)
     proactive._now_fn=lambda:clock[0]

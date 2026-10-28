@@ -10,16 +10,16 @@ async def test_qq_source_targets_qq_not_an_unrelated_channel(db, actor, seeded_s
     clock = [datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)]
     provider = cognition(script=[json.dumps({'action': 'reach_out', 'message': '刚想起一件事'})])
     settings = active_settings()
-    settings.qq = QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096', conversation_id=seeded_scope.conversation_id)
+    settings.qq = QQSettings(enabled=True, owner_qq='10001', bot_qq='10002', conversation_id=seeded_scope.conversation_id)
     service, proactive, idle = make_service(db, provider, settings, clock)
     sent = []
     class Bridge:
-        def proactive_available(self, target): return target['kind'] == 'private' and target['recipient'] == '3548782171'
+        def proactive_available(self, target): return target['kind'] == 'private' and target['recipient'] == '10001'
         async def deliver_proactive(self, target, content, result, check):
             await check(); sent.append((target, content))
     service.qq_bridge = Bridge()
     request = chat_request_factory(text='你好', conversation_id=seeded_scope.conversation_id)
-    request.device_id = 'qq-private:334193096:3548782171'
+    request.device_id = 'qq-private:10002:10001'
     accepted = await service.submit(actor, request)
     await service.run(accepted.generation_id)
     clock[0] += timedelta(seconds=31)
@@ -32,11 +32,11 @@ async def test_qq_binding_changed_before_idle_makes_no_model_call(db, actor, see
     clock = [datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)]
     provider = cognition()
     settings = active_settings()
-    settings.qq = QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096', conversation_id=seeded_scope.conversation_id)
+    settings.qq = QQSettings(enabled=True, owner_qq='10001', bot_qq='10002', conversation_id=seeded_scope.conversation_id)
     service, _, idle = make_service(db, provider, settings, clock)
     service.qq_bridge = SimpleNamespace(proactive_available=lambda target: True)
     request = chat_request_factory(text='你好', conversation_id=seeded_scope.conversation_id)
-    request.device_id = 'qq-private:334193096:3548782171'
+    request.device_id = 'qq-private:10002:10001'
     accepted = await service.submit(actor, request)
     await service.run(accepted.generation_id)
     settings.qq = settings.qq.model_copy(update={'owner_qq': '111111111'})
@@ -55,17 +55,17 @@ async def test_group_idle_uses_group_scope_and_same_target(db, actor, seeded_sco
     clock = [datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)]
     provider = cognition(script=[json.dumps({'action': 'reach_out', 'message': '补充一下'})])
     settings = active_settings()
-    settings.qq = QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096',
+    settings.qq = QQSettings(enabled=True, owner_qq='10001', bot_qq='10002',
         conversation_id=seeded_scope.conversation_id, group_enabled=True, allowed_groups=['123456789'])
     service, _, idle = make_service(db, provider, settings, clock)
     sent=[]
     async def deliver(target, content, result, check):
         await check(); sent.append(target); return {'sent': True}
     service.qq_bridge = SimpleNamespace(proactive_available=lambda target: True, deliver_proactive=deliver)
-    binding=ensure_group_binding(db, actor, companion_id=seeded_scope.companion_id, bot_qq='334193096', group_id='123456789')
+    binding=ensure_group_binding(db, actor, companion_id=seeded_scope.companion_id, bot_qq='10002', group_id='123456789')
     event=service.archive.record_external_message(actor, binding['conversation_id'], text='你好', external_message_id='synthetic-idle')
     accepted=service.archive.submit_external_reply(actor,binding['conversation_id'],event['id'],uuid4(),
-        output={},device_id='qq-group:334193096:123456789')
+        output={},device_id='qq-group:10002:123456789')
     await service.run(accepted.generation_id)
     scopes=[]
     original=ContextBuilder.build

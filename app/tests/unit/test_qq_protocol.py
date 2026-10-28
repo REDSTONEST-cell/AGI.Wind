@@ -8,13 +8,13 @@ from agi_wind.integrations.qq import QQSettings, QQConnection, private_message, 
 
 
 def config(**changes):
-    return QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096',
+    return QQSettings(enabled=True, owner_qq='10001', bot_qq='10002',
                       conversation_id=uuid4(), **changes)
 
 
 def event(**changes):
     return dict(post_type='message', message_type='private', sub_type='friend',
-                self_id=334193096, user_id=3548782171, message_id=8,
+                self_id=10002, user_id=10001, message_id=8,
                 message=[{'type':'text','data':{'text':'你好。'}}], **changes)
 
 
@@ -44,8 +44,8 @@ def test_missing_ids_unknown_segments_and_disabled_settings_are_ignored():
 def test_enabled_configuration_needs_explicit_binding():
     with pytest.raises(ValidationError): QQSettings(enabled=True)
     assert QQSettings().enabled is False
-    assert request_id_for('334193096',8)==request_id_for('334193096',8)
-    assert request_id_for('334193096',8)!=request_id_for('99999',8)
+    assert request_id_for('10002',8)==request_id_for('10002',8)
+    assert request_id_for('10002',8)!=request_id_for('99999',8)
 
 
 async def test_echo_responses_do_not_block_behind_event_work():

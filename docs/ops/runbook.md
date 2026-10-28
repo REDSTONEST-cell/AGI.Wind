@@ -1,6 +1,6 @@
 # 本地服务端运维
 
-目录：C:/Users/wind/Desktop/AGI.Wind。当前是 Windows 本地基础部署，NAS 尚未安装。
+目录：C:/path/to/AGI.Wind。当前是 Windows 本地基础部署，NAS 尚未安装。
 
 浏览器请打开 **http://127.0.0.1:18440/**，这是聊天客户端；依赖状态页在 **http://127.0.0.1:18440/status**。`/health/ready` 是机器健康接口，模型未配置时返回 HTTP 503，不作为浏览器网页入口。
 
@@ -59,7 +59,7 @@ Gateway 默认只监听 127.0.0.1:18440；PostgreSQL 只监听 127.0.0.1:55432�
 | data/voice.pid | 受管 Breeze 进程 PID |
 | data/voice.*.log | Breeze stdout/stderr（首次隐藏启动时创建） |
 | data/voice | 参考音频、试听/测试 WAV；不进入归档包 |
-| C:\Users\wind\Models\Breeze-TTS-2\voices\yuwan.breeze | 克隆音色文件，在项目外，需单独备份 |
+| C:\path\to\Models\Breeze-TTS-2\voices\yuwan.breeze | 克隆音色文件，在项目外，需单独备份 |
 | data/gateway.*.log | 运行日志，不打印秘密和完整 prompt |
 | data/local-smoke/report.json | 实际 HTTP 验证证据，仅合成数据 |
 
@@ -245,7 +245,7 @@ voice:
 - 旧导演链路真实聊天已产生 12.96 秒语音（情绪“惊讶”）；新的自报标记链路 live test 通过：`source=model_tag`、5.76 秒语音、正文不含 `[情绪:`，状态 ready，附件与历史可读。
 - 一条回复一条语音，不做逐句流式；400 字以上读节选并标记 `truncated`。
 - Breeze 权重为研究/非商业用途；用户参考音频与克隆授权由用户确认。
-- `.breeze` 音色文件和 `data/voice/*-reference.wav` **不进入 AGI.Wind 归档包**；迁移 NAS 时需单独备份 `C:\Users\wind\Models\Breeze-TTS-2\voices\yuwan.breeze` 和参考音频。
+- `.breeze` 音色文件和 `data/voice/*-reference.wav` **不进入 AGI.Wind 归档包**；迁移 NAS 时需单独备份 `C:\path\to\Models\Breeze-TTS-2\voices\yuwan.breeze` 和参考音频。
 - 语音服务不可用、超时、409 忙或显存不足时只影响该条语音，文字回复保持完整；`always` 模式会收到 `TTS_UNAVAILABLE` 提示。
 - 8 GB 显存下 Breeze 常驻约 5.9 GB；不要同时跑其他大 GPU 任务。NAS 尚未部署。
 

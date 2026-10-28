@@ -25,8 +25,8 @@ async def test_realtime_http_rejects_unbound_call_instead_of_crashing(db, actor,
 
 def test_background_memory_visits_private_and_each_enabled_group(db, actor, seeded_scope):
     from agi_wind.memory.runtime import _scopes
-    one=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='334193096',group_id='123456789')
-    two=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='334193096',group_id='223456789')
+    one=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='123456789')
+    two=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='223456789')
     scopes=_scopes(db,actor)
     assert {scope.room_id for scope in scopes if getattr(scope,'scene',None)=='group'} == {one['id'],two['id']}
     assert len([scope for scope in scopes if getattr(scope,'scene','owner_private')=='owner_private']) == 1
@@ -75,7 +75,7 @@ def test_owner_summary_sources_exclude_group_members_and_anonymous(db, actor, se
     from agi_wind.memory.consolidation import _rows
     from agi_wind.integrations.qq_groups import ensure_principal
     from agi_wind.archive.service import ArchiveService
-    binding=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='334193096',group_id='123456789')
+    binding=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,bot_qq='10002',group_id='123456789')
     principal=ensure_principal(db,actor,external_user_id='999999999',nickname='synthetic',is_owner=False)
     archive=ArchiveService(db)
     for sender in (principal['id'],None):
@@ -100,14 +100,14 @@ async def test_observed_owner_group_message_schedules_owner_not_member_extractio
     assert not db.all('outbox',event_type='memory.extract.member')
 
 
-@pytest.mark.parametrize('source_device',['qq-private:334193096:3548782171','web'])
+@pytest.mark.parametrize('source_device',['qq-private:10002:10001','web'])
 async def test_regular_proactive_uses_the_same_qq_target_as_after_reply(db, actor, seeded_scope, chat_request_factory, source_device):
     from types import SimpleNamespace
     from agi_wind.integrations.qq import QQSettings
     clock=[datetime(2026,10,27,4,0,tzinfo=timezone.utc)]
     provider=cognition(reply='[情绪:平静]\nsynthetic message')
     settings=active_settings()
-    settings.qq=QQSettings(enabled=True,owner_qq='3548782171',bot_qq='334193096',conversation_id=seeded_scope.conversation_id)
+    settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',conversation_id=seeded_scope.conversation_id)
     service,proactive,_=make_service(db,provider,settings,clock)
     sent=[]
     async def deliver(target,content,result,check):
@@ -126,7 +126,7 @@ async def test_offline_qq_does_not_block_web_proactive_message(db, actor, seeded
     from types import SimpleNamespace
     from agi_wind.integrations.qq import QQSettings
     settings=active_settings()
-    settings.qq=QQSettings(enabled=True,owner_qq='3548782171',bot_qq='334193096',conversation_id=seeded_scope.conversation_id)
+    settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',conversation_id=seeded_scope.conversation_id)
     service,proactive,_=make_service(db,cognition(),settings,[m.now()])
     service.qq_bridge=SimpleNamespace(proactive_available=lambda target:False)
     with db.engine.connect() as conn:
@@ -170,7 +170,7 @@ async def test_idle_media_obeys_live_sticker_send_permission(db, actor, seeded_s
     assert not media
 
 
-@pytest.mark.parametrize('source_device',['qq-private:334193096:3548782171','web'])
+@pytest.mark.parametrize('source_device',['qq-private:10002:10001','web'])
 async def test_chat_to_idle_tools_to_qq_sticker_archive_and_logs(db, actor, seeded_scope, chat_request_factory, tmp_path, source_device):
     """One real service path across modules; only vendor and OneBot I/O are fake."""
     from types import SimpleNamespace
@@ -204,7 +204,7 @@ async def test_chat_to_idle_tools_to_qq_sticker_archive_and_logs(db, actor, seed
     provider.tool_turn=tool_turn
     clock=[datetime(2026,10,27,4,0,tzinfo=timezone.utc)]
     settings=active_settings(); settings.data_dir=tmp_path
-    settings.qq=QQSettings(enabled=True,owner_qq='3548782171',bot_qq='334193096',
+    settings.qq=QQSettings(enabled=True,owner_qq='10001',bot_qq='10002',
         conversation_id=seeded_scope.conversation_id,reply_delay_seconds=0)
     service,_,idle=make_service(db,provider,settings,clock)
     service.agent_settings=lambda:AgentSettings(enabled=True)
@@ -223,7 +223,7 @@ async def test_chat_to_idle_tools_to_qq_sticker_archive_and_logs(db, actor, seed
     assert run['state']=='sent'
     assert len(calls)==3 and provider.complete_calls==0
     assert [params['message'][0]['type'] for _,params in delivered]==['text','image']
-    assert all(action=='send_private_msg' and params['user_id']==3548782171 for action,params in delivered)
+    assert all(action=='send_private_msg' and params['user_id']==10001 for action,params in delivered)
     event=db.all('events',id=run['message_event_id'])[0]
     assert event['content']['attachments'][0]['asset_id']==str(asset['id'])
     assert 'synthetic private thought' not in json.dumps(event['content'])

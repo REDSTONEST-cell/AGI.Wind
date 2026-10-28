@@ -11,8 +11,8 @@ from agi_wind.memory.extraction import MemoryCandidate, MemoryWriter
 from agi_wind.memory.retrieval import MemoryService
 from agi_wind.memory.jobs import _load_batch
 
-BOT = "334193096"
-OWNER = "3548782171"
+BOT = "10002"
+OWNER = "10001"
 GROUP_A = "123456789"
 GROUP_B = "987654321"
 

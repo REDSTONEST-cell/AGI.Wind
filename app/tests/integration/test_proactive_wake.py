@@ -15,7 +15,7 @@ from test_proactive import ProactiveProvider, active_settings, old_user_event, s
 
 def setup_wake(db, actor, scope, raw):
     settings = active_settings(min_idle_minutes=5, min_gap_minutes=30, quiet_start='00:00', quiet_end='00:00')
-    settings.qq = QQSettings(enabled=True, owner_qq='3548782171', bot_qq='334193096',
+    settings.qq = QQSettings(enabled=True, owner_qq='10001', bot_qq='10002',
                              conversation_id=scope.conversation_id)
     provider = ProactiveProvider(raw)
     provider.text = raw
@@ -44,7 +44,7 @@ async def test_schedule_ignores_newer_group_and_sends_owner_qq(db, actor, seeded
     proactive, _, _ = setup_wake(db, actor, seeded_scope,
                                  json.dumps({'action':'reach_out','message':'给哥哥的话'}))
     group = ensure_group_binding(db, actor, companion_id=seeded_scope.companion_id,
-                                 bot_qq='334193096', group_id='123456789')
+                                 bot_qq='10002', group_id='123456789')
     sent=[]
     proactive.settings.data_dir=tmp_path
     proactive.settings.qq.reply_delay_seconds=0
@@ -59,14 +59,14 @@ async def test_schedule_ignores_newer_group_and_sends_owner_qq(db, actor, seeded
     event = db.all('events',role='assistant')[0]
     assert event['conversation_id'] == seeded_scope.conversation_id != group['conversation_id']
     assert event['content']['text'] == '给哥哥的话'
-    assert sent[0][0]=='send_private_msg' and sent[0][1]['user_id']==3548782171
+    assert sent[0][0]=='send_private_msg' and sent[0][1]['user_id']==10001
     assert event['content']['qq_delivery']['qq_synced'] is True
 
 
 async def test_schedule_cannot_archive_into_group_even_if_caller_passes_one(db, actor, seeded_scope):
     proactive, _, _ = setup_wake(db, actor, seeded_scope, '{}')
     group = ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,
-                                 bot_qq='334193096',group_id='123456789')
+                                 bot_qq='10002',group_id='123456789')
     with db.engine.connect() as conn:
         conversation=conn.execute(select(m.conversations).where(m.conversations.c.id==group['conversation_id'])).mappings().one()
     result=await proactive.deliver(actor,conversation,'must not appear',trigger='schedule')
@@ -117,6 +117,6 @@ async def test_silent_wakes_have_a_daily_model_call_cap(db, actor, seeded_scope)
 def test_historical_misrouted_group_schedule_does_not_spend_private_quota(db, actor, seeded_scope):
     proactive,_,_=setup_wake(db,actor,seeded_scope,'')
     group=ensure_group_binding(db,actor,companion_id=seeded_scope.companion_id,
-                              bot_qq='334193096',group_id='123456789')
+                              bot_qq='10002',group_id='123456789')
     proactive.archive.create_proactive_message(actor,group['conversation_id'],'legacy wrong route',trigger='schedule')
     assert proactive.stats(actor,seeded_scope.companion_id)['sent_today']==0

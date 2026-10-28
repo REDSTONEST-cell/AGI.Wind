@@ -10,7 +10,7 @@ from agi_wind.integrations.qq import QQBridge, QQSettings, private_message
 
 
 def qq_settings(**overrides):
-    values = dict(enabled=True, owner_qq="3548782171", bot_qq="334193096",
+    values = dict(enabled=True, owner_qq="10001", bot_qq="10002",
                   conversation_id=uuid4(), reply_delay_seconds=0)
     values.update(overrides)
     return QQSettings(**values)
@@ -19,7 +19,7 @@ def qq_settings(**overrides):
 def private_event(message_id, text):
     return {
         "post_type": "message", "message_type": "private", "sub_type": "friend",
-        "self_id": 334193096, "user_id": 3548782171, "message_id": message_id,
+        "self_id": 10002, "user_id": 10001, "message_id": message_id,
         "time": __import__("time").time(),
         "message": [{"type": "text", "data": {"text": text}}],
     }
@@ -28,7 +28,7 @@ def private_event(message_id, text):
 def private_image_event(message_id):
     return {
         "post_type": "message", "message_type": "private", "sub_type": "friend",
-        "self_id": 334193096, "user_id": 3548782171, "message_id": message_id,
+        "self_id": 10002, "user_id": 10001, "message_id": message_id,
         "time": __import__("time").time(),
         "message": [{"type": "image", "data": {"url": "https://example.test/a.png"}}],
     }
@@ -70,7 +70,7 @@ async def test_pause_enforces_the_minimum_gap_and_first_segment_cap(monkeypatch)
 
 def test_debounce_settings_validate_quiet_window():
     with pytest.raises(ValidationError):
-        QQSettings(enabled=True, owner_qq="3548782171", bot_qq="334193096",
+        QQSettings(enabled=True, owner_qq="10001", bot_qq="10002",
                    conversation_id=uuid4(), debounce_quiet_seconds=9,
                    debounce_max_wait_seconds=2)
 
@@ -175,7 +175,7 @@ async def test_private_batch_becomes_one_chat_request(db, actor, seeded_scope):
         assert submitted[0].input.text == "我今天去开会了\n然后甲方又改需求"
         assert submitted[0].input.asset_ids == []
         assert sent and sent[0][0] == "send_private_msg"
-        assert sent[0][1]["user_id"] == 3548782171
+        assert sent[0][1]["user_id"] == 10001
     finally:
         bridge.connection = None
         await bridge.debouncer.close()
