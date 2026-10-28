@@ -17,6 +17,8 @@ $localAddress = Get-NetIPAddress -AddressFamily IPv6 | Where-Object IPAddress -e
 if (-not $localAddress) { throw 'Configured IPv6 address is no longer assigned to this computer. Update config/https.local.json and the hostname.' }
 $gatewayPort = [int]$config.gateway_port
 if ($gatewayPort -lt 1 -or $gatewayPort -gt 65535) { throw 'Invalid Gateway port.' }
+$upstreamHost = if ($config.upstream_host) { [string]$config.upstream_host } else { '127.0.0.1' }
+if ($upstreamHost -notmatch '^[A-Za-z0-9.:-]+$') { throw 'Invalid upstream host.' }
 $stateDir = Join-Path $projectRoot 'data\https'
 [IO.Directory]::CreateDirectory($stateDir) | Out-Null
 $suffix = if ($Staging) { 'staging' } else { 'production' }
@@ -55,7 +57,7 @@ $dnsOptions
     }
 }
 https://${siteName}:$httpsPort {
-    reverse_proxy 127.0.0.1:$gatewayPort {
+    reverse_proxy ${upstreamHost}:$gatewayPort {
         flush_interval -1
     }
 }

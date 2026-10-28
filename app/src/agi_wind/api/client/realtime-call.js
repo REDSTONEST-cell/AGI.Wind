@@ -20,11 +20,11 @@ export function createRealtimeCall(client, hooks) {
       speechCredits -= 1;
     }
   }
-  async function cancelGeneration(previous) {
+  async function cancelGeneration(previous, { finish = true } = {}) {
     if (!previous) return;
     previous.cancelled = true;
     previous.controller.abort();
-    previous.view?.finish('cancelled');
+    if (finish) previous.view?.finish('cancelled');
     // Submission is not aborted: if accepted during an interruption, consume its ID and cancel it.
     try {
       const accepted = await previous.accepting;
@@ -86,10 +86,26 @@ export function createRealtimeCall(client, hooks) {
       if (!terminal && !current.cancelled) throw new Error('回复连接提前结束');
     } catch (error) {
       if (!current.cancelled && active && expectedSession === session) {
+        // The SSE stream can close just after the server commits a completed reply.
+        // Check the authoritative generation state before showing a failure bubble.
+        if (current.accepted?.generation_id) {
+          try {
+            const state = await client.request('/api/v1/generations/' + current.accepted.generation_id, {
+              signal: AbortSignal.timeout(3000),
+            });
+            if (state.state === 'completed') {
+              terminal = true;
+              current.view.finish('completed');
+              log('通话回复已完成', {elapsed_ms:Math.round(performance.now()-started)});
+              return;
+            }
+          } catch { /* fall through to the visible failure path */ }
+        }
         current.view.finish('failed'); label('回复中断，请再说一次');
         log('通话回复失败', {code:error.code || error.name});
         // A broken SSE connection must not leave an invisible generation running.
-        await cancelGeneration(current);
+        // Do not append a second "cancelled" status after the failure bubble.
+        await cancelGeneration(current, {finish:false});
       }
     } finally {
       if (turn === current && (current.cancelled || terminal)) turn = null;

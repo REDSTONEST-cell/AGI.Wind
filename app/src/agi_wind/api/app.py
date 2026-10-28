@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse,StreamingResponse,FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine,select,text,func
 from pydantic import Field,ValidationError,SecretStr
-from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings,ProactiveSettings,SETTINGS_WRITE_LOCK
+from ..core.settings import Settings,load_settings,apply_persisted_settings,persist_settings,ProviderSettings,ProactiveSettings,AmbientSettings,SETTINGS_WRITE_LOCK
 from ..core.secrets import SecretStore,credential_ref_for
 from ..core.types import DTO,Actor,ChatRequest,ModelRef,Scope
 from ..core.errors import AppError
@@ -39,6 +39,7 @@ from ..memory.budget import MemoryBudget
 from ..delivery.service import GenerationService,generation_scope,TERMINAL
 from ..delivery.proactive import ProactiveService
 from ..delivery.idle_cognition import IdleCognitionService
+from ..ambient.observer import AmbientObserver
 from ..delivery.stream import encode_sse
 from ..delivery import models as dm
 from ..voice.service import VoiceService
@@ -129,6 +130,17 @@ class ProactiveSettingsPatch(DTO):
     continuation_max_messages:int|None=Field(default=None,ge=1,le=5)
     continuation_max_wait_seconds:int|None=Field(default=None,ge=10,le=3600)
     continuation_lifetime_minutes:int|None=Field(default=None,ge=1,le=120)
+class AmbientSettingsPatch(DTO):
+    enabled:bool|None=None
+    sample_seconds:int|None=Field(default=None,ge=10,le=600)
+    screenshot_seconds:int|None=Field(default=None,ge=60,le=1800)
+    capture_screenshots:bool|None=None
+    screenshot_max_width:int|None=Field(default=None,ge=480,le=2560)
+    max_screenshots_per_hour:int|None=Field(default=None,ge=1,le=60)
+    retention_hours:int|None=Field(default=None,ge=1,le=168)
+    share_with_model:bool|None=None
+    excluded_processes:list[str]|None=Field(default=None,max_length=40)
+    excluded_title_keywords:list[str]|None=Field(default=None,max_length=40)
 class ProactiveSendRequest(DTO): companion_id:UUID
 class ExportRequest(DTO): companion_id:UUID
 class StickerCreate(DTO):
@@ -205,8 +217,18 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     client_dir=Path(__file__).with_name("client")
 
     def same_origin(request):
-        origin=request.headers.get("origin","")
-        return origin==f"{request.url.scheme}://{request.url.netloc}"
+        """Accept the exact request origin, or an explicitly configured public origin.
+
+        TLS normally terminates at the reverse proxy, so FastAPI sees an internal
+        ``http://...`` URL while the browser sends the public ``https://...`` Origin.
+        Comparing only the internal URL would reject the legitimate login. The
+        configured allow-list is trusted and is also what CORS uses.
+        """
+        origin=request.headers.get("origin","").rstrip("/")
+        if not origin: return False
+        if origin==f"{request.url.scheme}://{request.url.netloc}".rstrip("/"): return True
+        configured={item.rstrip("/") for item in getattr(settings,"allowed_origins",[]) if item}
+        return origin in configured
 
     def is_loopback(request):
         """True only for a request delivered over loopback with a loopback Host header.
@@ -252,6 +274,8 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     idle_cognition=IdleCognitionService(db,settings,service,proactive=proactive)
     proactive.idle_cognition=idle_cognition
     service.idle_cognition=idle_cognition
+    ambient=AmbientObserver(db,settings,actor)
+    service.ambient=ambient
 
     @asynccontextmanager
     async def lifespan(app):
@@ -342,9 +366,11 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
                 except TimeoutError:
                     pass
         idle_cognition_task=asyncio.create_task(idle_cognition_loop())
+        ambient.start()
         try: yield
         finally:
             closing.set(); wakeup.set()
+            await ambient.stop()
             await app.state.qq_bridge.close()
             for pending in (task,maintenance_task,proactive_task,idle_cognition_task):
                 pending.cancel()
@@ -364,6 +390,7 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
     app.state.voice=voice
     app.state.proactive=proactive
     app.state.idle_cognition=idle_cognition
+    app.state.ambient=ambient
     app.state.browser_sessions=sessions
     app.state.settings=settings
     db.memory_settings=settings
@@ -1038,6 +1065,47 @@ def create_app(settings:Settings,db:Database,actor:Actor,generation_service=None
             idle_cognition.cancel_continuations(current)
         logger.info("proactive settings updated enabled=%s idle=%s gap=%s max=%s",updated.enabled,updated.min_idle_minutes,updated.min_gap_minutes,updated.max_per_day)
         return proactive_view(current)
+
+    def ambient_view(limit=8):
+        data=ambient.status()
+        data["settings"]=settings.ambient.model_dump(mode="json")
+        rows=ambient.recent(limit)
+        for row in rows:
+            row["screenshot_url"]=("/api/v1/ambient/observations/"+str(row["id"])+"/screenshot") if row.get("screenshot_path") else None
+            row.pop("screenshot_path",None)
+        data["observations"]=rows
+        return data
+
+    @app.get("/api/v1/ambient/status")
+    def ambient_status(current=Depends(authenticate)):
+        return ambient_view()
+
+    @app.get("/api/v1/ambient/observations")
+    def ambient_observations(limit:int=Query(default=20,ge=1,le=100),current=Depends(authenticate)):
+        rows=ambient.recent(limit)
+        for row in rows:
+            row["screenshot_url"]=("/api/v1/ambient/observations/"+str(row["id"])+"/screenshot") if row.get("screenshot_path") else None
+            row.pop("screenshot_path",None)
+        return rows
+
+    @app.get("/api/v1/ambient/observations/{observation_id}/screenshot")
+    def ambient_screenshot(observation_id:UUID,current=Depends(authenticate)):
+        found=ambient.screenshot_for(observation_id)
+        if found is None: raise AppError("NOT_FOUND","没有可用的屏幕截图",404)
+        _row,path=found
+        return FileResponse(path,media_type="image/jpeg",headers={"Cache-Control":"private,no-store"})
+
+    @app.patch("/api/v1/ambient/settings")
+    def update_ambient_settings(body:AmbientSettingsPatch,current=Depends(authenticate)):
+        data=settings.ambient.model_dump()
+        data.update(body.model_dump(exclude_unset=True,exclude_none=True))
+        try: updated=AmbientSettings.model_validate(data)
+        except ValidationError: raise AppError("INVALID_AMBIENT_SETTINGS","环境观察设置无效",422) from None
+        with SETTINGS_WRITE_LOCK:
+            settings.ambient=updated
+            persist_settings(settings)
+        logger.info("ambient settings updated enabled=%s screenshots=%s sample=%ss",updated.enabled,updated.capture_screenshots,updated.sample_seconds)
+        return ambient_view()
 
     @app.post("/api/v1/proactive/send")
     async def send_proactive(body:ProactiveSendRequest,current=Depends(authenticate)):

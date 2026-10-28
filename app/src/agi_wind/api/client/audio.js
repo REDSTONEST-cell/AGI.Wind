@@ -5,6 +5,21 @@
 
 const WAVE_HEIGHTS = [7, 12, 18, 10, 22, 15, 9, 19, 25, 13, 8, 17, 23, 11, 16, 21, 9, 14, 20, 12, 24, 10, 16, 8];
 let activePlayer = null;
+let automaticPlayer = null;
+const autoplayQueue = [];
+function pumpAutoplay() {
+  if (activePlayer || automaticPlayer || !autoplayQueue[0]?.loaded) return;
+  const player = autoplayQueue.shift();
+  activePlayer = automaticPlayer = player;
+  player.playAutomatically();
+}
+function dropAutoplay(player) {
+  const index = autoplayQueue.indexOf(player);
+  if (index >= 0) autoplayQueue.splice(index, 1);
+  if (activePlayer === player) activePlayer = null;
+  if (automaticPlayer === player) automaticPlayer = null;
+  pumpAutoplay();
+}
 
 function node(tag, className, text) {
   const element = document.createElement(tag);
@@ -39,11 +54,10 @@ function stateLabel(state, options = {}) {
   return '';
 }
 
-function stopOther(player) {
-  if (activePlayer && activePlayer !== player) activePlayer.stop();
-}
-
 export function stopAllAudio() {
+  for (const player of autoplayQueue.splice(0)) player.cancelAutoplay();
+  automaticPlayer?.cancelAutoplay();
+  automaticPlayer = null;
   if (activePlayer) {
     activePlayer.stop();
     activePlayer = null;
@@ -131,6 +145,7 @@ export function createAudioMessage(client, message, options = {}) {
         if (destroyed) return;
         setStatus('语音加载失败，点击重试', 'ready');
         release();
+        dropAutoplay(controller);
       });
       audio.addEventListener('loadedmetadata', () => {
         if (destroyed || !audio) return;
@@ -157,24 +172,20 @@ export function createAudioMessage(client, message, options = {}) {
         play.setAttribute('aria-label', '播放语音');
         duration.textContent = formatDuration(expected || 0);
         setProgress(0);
-        if (activePlayer === controller) activePlayer = null;
+        dropAutoplay(controller);
       });
       play.disabled = false;
       if (pendingPlay) {
         pendingPlay = false;
-        stopOther(controller);
+        stopAllAudio();
         activePlayer = controller;
         audio.play().catch(() => setStatus('点击播放', 'ready'));
       }
-      if (autoplayWanted && !autoplayTried) {
-        autoplayTried = true;
-        stopOther(controller);
-        activePlayer = controller;
-        audio.play().catch(() => setStatus('点击播放', 'ready'));
-      }
+      pumpAutoplay();
     }).catch((error) => {
       if (destroyed || token !== loadToken) return;
       setStatus(error && error.status === 401 ? '语音需要重新登录' : '语音读取失败，点击重试', 'ready');
+      dropAutoplay(controller);
     });
   };
 
@@ -182,11 +193,11 @@ export function createAudioMessage(client, message, options = {}) {
     if (currentState !== 'ready') return;
     if (!audio) { pendingPlay = true; loadAudio(); return; }
     if (audio.paused) {
-      stopOther(controller);
+      stopAllAudio();
       activePlayer = controller;
       audio.play().catch(() => setStatus('点击播放', 'ready'));
     } else {
-      audio.pause();
+      stopAllAudio();
     }
   };
 
@@ -202,6 +213,7 @@ export function createAudioMessage(client, message, options = {}) {
     if (next.autoplay === false) autoplayWanted = false;
 
     if (nextState === 'ready') {
+      if (autoplayWanted && !autoplayTried && !autoplayQueue.includes(controller) && automaticPlayer !== controller) autoplayQueue.push(controller);
       loadAudio();
       return;
     }
@@ -224,12 +236,18 @@ export function createAudioMessage(client, message, options = {}) {
       destroyed = true;
       loadToken += 1;
       release();
-      if (activePlayer === controller) activePlayer = null;
+      dropAutoplay(controller);
       root.remove();
     },
     stop() {
       if (audio && !audio.paused) audio.pause();
     },
+    cancelAutoplay() { autoplayWanted = false; autoplayTried = true; pendingPlay = false; },
+    playAutomatically() {
+      autoplayTried = true;
+      audio.play().catch(() => { if (automaticPlayer === controller) stopAllAudio(); setStatus('点击播放', 'ready'); });
+    },
+    get loaded() { return !!audio && !destroyed; },
     get attachment() { return attachment; },
     get state() { return currentState; },
   };

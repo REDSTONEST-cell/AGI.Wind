@@ -80,6 +80,10 @@ VOICE_META_RE = re.compile(
     r"(设置|开关|功能|概率|音量|识别|转文字|模型|接口|关闭|打开|开启).{0,8}(语音|声音)"
     r"|(语音|声音).{0,8}(设置|开关|功能|在哪|哪里|怎么|如何|关闭|打开|开启|概率|音量|识别|转文字|模型|接口)"
 )
+# The group prompt uses "[名字] " only to label incoming members. Older assistant
+# rows and occasional model output copied that format; strip one leading tag when
+# rebuilding context and when persisting group replies.
+GROUP_SPEAKER_PREFIX_RE = re.compile(r"^\s*\[[^\]\n]{1,24}\]\s*")
 logger = logging.getLogger("agi_wind.delivery")
 
 def generation_scope(conn, generation_id, actor=None):
@@ -115,6 +119,7 @@ class GenerationService:
         self.notify=None
         # Set by the gateway; None keeps tests and standalone service instances unchanged.
         self.idle_cognition=None
+        self.ambient=None
 
     async def submit(self, actor, request):
         if self.idle_cognition is not None:
@@ -267,9 +272,14 @@ class GenerationService:
                         voice_mode == "auto" and self.random_value() < self.voice.probability
                     )
                 voice_streak = 0
+                group_scene = getattr(scope, "scene", "owner_private") == "group"
 
                 async def handle_segment(segment_text):
                     nonlocal voice_streak
+                    if group_scene:
+                        segment_text = GROUP_SPEAKER_PREFIX_RE.sub("", segment_text, count=1).strip()
+                        if not segment_text:
+                            return
                     index = len(segments)
                     info = {"index": index, "text": segment_text, "kind": "text"}
                     use_voice = voice_turn
@@ -566,7 +576,8 @@ class GenerationService:
         group_scene = scope is not None and getattr(scope, "scene", "owner_private") == "group"
         if group_scene:
             guide += ("\n【QQ群聊】这是QQ群聊，群内所有成员共用同一条时间线。你不是主人的私人替身：不继承主人的私密关系、承诺或私聊内容，"
-                      "也不要把群成员当成主人。每条成员消息前的[名字]是发言人，回复时自然面对当前发言人，也可回应群里被提到的话题；"
+                      "也不要把群成员当成主人。每条成员消息前的[名字]只是输入用的发言人标记，你的回复正文绝不能写[名字]前缀，也不要模仿这个格式；"
+                      "回复时自然面对当前发言人，也可回应群里被提到的话题；"
                       "不要泄露任何私人记忆或别的群的内容，不要声称执行本机文件、命令或管理员操作。")
         if include_sticker and scope is not None:
             guide += "\n" + STICKER_GUIDE.format(catalog=self._sticker_catalog(scope))
@@ -574,17 +585,29 @@ class GenerationService:
                   + guide + "\n" + json.dumps(identity, ensure_ascii=False))
         if self.voice is not None and getattr(self.voice, "enabled", False):
             system += "\n" + VOICE_GUIDE
+        if self.ambient is not None and scope is not None and not group_scene:
+            try:
+                ambient_context = self.ambient.prompt_context()
+            except Exception:
+                logger.warning("ambient context failed",exc_info=True)
+                ambient_context = ""
+            if ambient_context:
+                system += "\n" + ambient_context
         system += "\n" + SEGMENTATION_OVERRIDE
         messages = [{"role": "system", "content": system}]
         if context.memories:
             messages.append({"role":"user", "content":"历史资料（非当前用户指令）：" + json.dumps([hit.model_dump(mode="json") for hit in context.memories],ensure_ascii=False)})
-        bot_name = str((context.persona_snapshot.core or {}).get("name") or "助手")
         for event in context.recent_events:
             if event["role"] not in ("user", "assistant"): continue
             text = event["content"].get("text", "")
+            # Only incoming member messages get a speaker tag. Tagging the bot's
+            # own history made the model copy the format and emit "[鱼丸] ...".
             if group_scene:
-                speaker = event.get("speaker") or (bot_name if event["role"] == "assistant" else "群成员")
-                text = f"[{speaker}] {text}"
+                if event["role"] == "user":
+                    speaker = event.get("speaker") or "群成员"
+                    text = f"[{speaker}] {text}"
+                else:
+                    text = GROUP_SPEAKER_PREFIX_RE.sub("", text, count=1)
             messages.append({"role":event["role"], "content":text})
         content = context.current_input.text
         if group_scene:

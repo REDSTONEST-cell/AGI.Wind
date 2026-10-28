@@ -2,9 +2,9 @@ import { AgiWindClient, ApiError } from './sdk/api.js?v=20261027memberpool1';
 import { appendImages, messageImages } from './media.js?v=20261027a';
 import { cropAvatar } from './avatar-crop.js?v=20261027a';
 import { splitReply } from './reply-segments.js?v=20261027b';
-import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027b';
+import { createAudioMessage, stopAllAudio } from './audio.js?v=20261027autoplay1';
 import { createAgentPage } from './agent-settings.js?v=20261027e';
-import { createRealtimeCall } from './realtime-call.js?v=20261027-mic1';
+import { createRealtimeCall } from './realtime-call.js?v=20261027-callfix1';
 import { bindMicrophoneSettings, microphoneError } from './microphone.js?v=20261027-mic1';
 import { createVoiceInput } from './voice-input.js?v=20261027-mic1';
 import { createQQPage } from './qq-settings.js?v=20261027qqdebounce1';
@@ -608,6 +608,11 @@ function renderTermSimple(rows, output) {
 function renderTerm() {
   const output = $('#term-output');
   if (!output) return;
+  const follow = state.termFollow;
+  // Replacing all rows resets scrollTop to 0 and fires a scroll event. Without
+  // this guard that synthetic event would turn "跟随" off and the view would
+  // stay stuck at the top instead of following new log lines.
+  state.termScrollLock = follow;
   const rows = filteredTermRows();
   output.replaceChildren();
   if (state.logMode === 'simple') {
@@ -637,7 +642,15 @@ function renderTerm() {
       output.append(entry);
     }
   }
-  updateTermControls({ scroll: state.termFollow });
+  updateTermControls({ scroll: false });
+  if (follow) {
+    const scrollBox = $('#log-scroll');
+    scrollBox.scrollTop = scrollBox.scrollHeight;
+    requestAnimationFrame(() => {
+      scrollBox.scrollTop = scrollBox.scrollHeight;
+      setTimeout(() => { state.termScrollLock = false; }, 80);
+    });
+  }
 }
 
 async function copyTermLogs() {
@@ -2022,7 +2035,19 @@ function createReplyTurn(container,options={},first=null) {
   return turn;
 }
 
-const LIVE_TYPING = { baseMs: 220, perCharMs: 55, punctMs: 120, gapMs: 320, maxMs: 12000 };
+// A reply should not land the instant the user hits send. The first bubble waits
+// for a short human "read + think" beat, then each later bubble gets a real gap
+// after the previous one finishes. Tests can zero these through __AGI_TYPING__.
+const LIVE_TYPING = {
+  baseMs: 220,
+  perCharMs: 55,
+  punctMs: 120,
+  gapMs: 700,
+  initialMs: 1200,
+  initialPerCharMs: 16,
+  initialMaxMs: 3000,
+  maxMs: 12000,
+};
 
 function liveTypingConfig() {
   const override = typeof window !== 'undefined' && window.__AGI_TYPING__ ? window.__AGI_TYPING__ : {};
@@ -2050,7 +2075,7 @@ function createLiveReplyTurn(container, options = {}, first = null) {
   let finished = false;
   let abortState = '';
   let lastItem = null;
-  let autoPlayed = false;
+  let typedAny = false;
 
   const addItem = (kind) => {
     let base = firstPending;
@@ -2077,8 +2102,22 @@ function createLiveReplyTurn(container, options = {}, first = null) {
     if (!animate || reduceMotion || abortState) {
       item.body.innerHTML = renderMarkdown(value);
       item.partText = value;
+      typedAny = true;
       scrollToEnd(true);
       return;
+    }
+    if (!typedAny) {
+      typedAny = true;
+      const chars = Array.from(value).length;
+      const initial = Math.min(
+        Number(timing.initialMaxMs ?? 3000),
+        Number(timing.initialMs ?? 0) + chars * Number(timing.initialPerCharMs ?? 0),
+      );
+      if (initial > 0) {
+        item.node.classList.add('typing');
+        await liveSleep(initial);
+        item.node.classList.remove('typing');
+      }
     }
     item.node.classList.add('typing');
     let shown = '';
@@ -2114,9 +2153,7 @@ function createLiveReplyTurn(container, options = {}, first = null) {
     const state = await entry.wait;
     item.node.classList.remove('voice-pending');
     if (state === 'ready') {
-      const autoplay = !autoPlayed;
-      autoPlayed = true;
-      item.audio.update({ state: 'ready', attachment: entry.data.attachment, segment_id: entry.segment_id, autoplay });
+      item.audio.update({ state: 'ready', attachment: entry.data.attachment, segment_id: entry.segment_id, autoplay: true });
       scrollToEnd(true);
       await liveSleep(260);
       return;
@@ -3813,6 +3850,115 @@ async function saveTtsSettings() {
   }
 }
 
+async function loadAmbientSettings() {
+  try {
+    renderAmbientStatus(await client.ambientStatus());
+  } catch (error) {
+    const hint = $('#ambient-hint');
+    if (hint) hint.textContent = '读取环境感知设置失败：' + error.message;
+  }
+}
+
+function renderAmbientStatus(data) {
+  const settings = data.settings || {};
+  const enabled = $('#ambient-enabled');
+  if (enabled) enabled.checked = Boolean(settings.enabled);
+  const screenshots = $('#ambient-screenshots');
+  if (screenshots) screenshots.checked = settings.capture_screenshots !== false;
+  const share = $('#ambient-share');
+  if (share) share.checked = settings.share_with_model !== false;
+  for (const [id, value] of [
+    ['ambient-sample-seconds', settings.sample_seconds],
+    ['ambient-screenshot-seconds', settings.screenshot_seconds],
+    ['ambient-max-screenshots', settings.max_screenshots_per_hour],
+    ['ambient-retention-hours', settings.retention_hours],
+  ]) {
+    const input = $('#' + id);
+    if (input && value !== undefined && value !== null) input.value = value;
+  }
+  const state = $('#ambient-state');
+  if (state) state.textContent = data.enabled ? (data.running ? '观察中' : '已开启') : '已关闭';
+  const meta = $('#ambient-meta');
+  if (meta) {
+    const last = data.last_observation_at ? formatTime(data.last_observation_at) : '暂无';
+    meta.textContent = '已采样 ' + (data.samples || 0) + ' 次 · 截图 ' + (data.screenshots || 0) + ' 张 · 最近 ' + last
+      + (data.last_error ? ' · 最近错误：' + data.last_error : '');
+  }
+  renderAmbientObservations(data.observations || []);
+}
+
+function renderAmbientObservations(rows) {
+  const box = $('#ambient-recent');
+  if (!box) return;
+  box.replaceChildren();
+  if (!rows.length) {
+    box.append(el('p', { class: 'meta', text: '还没有环境记录。开启后她只会看到前台窗口名称和空闲时间。' }));
+    return;
+  }
+  for (const row of rows) {
+    const item = el('div', { class: 'memory-job' }, [
+      el('div', { class: 'memory-job-head' }, [
+        el('strong', { text: row.window_title || '（无标题窗口）' }),
+        el('span', { class: 'meta', text: formatTime(row.captured_at) }),
+      ]),
+      el('p', {
+        class: 'meta',
+        text: (row.process_name || '未知程序') + ' · 空闲 ' + (row.idle_seconds || 0) + ' 秒'
+          + (row.sensitive ? ' · 敏感窗口已跳过' : ''),
+      }),
+    ]);
+    if (row.screenshot_url) {
+      item.append(el('button', {
+        class: 'btn ghost small', type: 'button', text: '查看截图',
+        onclick: () => previewAmbientScreenshot(row.id),
+      }));
+    }
+    box.append(item);
+  }
+}
+
+async function saveAmbientSettings() {
+  const button = $('#ambient-save');
+  const hint = $('#ambient-hint');
+  if (button) button.disabled = true;
+  if (hint) hint.textContent = '正在保存…';
+  try {
+    const data = await client.ambientUpdateSettings({
+      enabled: Boolean($('#ambient-enabled')?.checked),
+      capture_screenshots: Boolean($('#ambient-screenshots')?.checked),
+      share_with_model: Boolean($('#ambient-share')?.checked),
+      sample_seconds: Number($('#ambient-sample-seconds')?.value || 60),
+      screenshot_seconds: Number($('#ambient-screenshot-seconds')?.value || 120),
+      max_screenshots_per_hour: Number($('#ambient-max-screenshots')?.value || 12),
+      retention_hours: Number($('#ambient-retention-hours')?.value || 24),
+    });
+    renderAmbientStatus(data);
+    if (hint) hint.textContent = data.enabled ? '已保存，正在观察。' : '已保存，环境感知已关闭。';
+    toast(data.enabled ? '电脑环境感知已开启。' : '电脑环境感知已关闭。');
+  } catch (error) {
+    if (hint) hint.textContent = '保存失败：' + error.message;
+    toast('保存环境感知设置失败：' + error.message);
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function previewAmbientScreenshot(id) {
+  try {
+    const blob = await client.ambientScreenshot(id);
+    const url = URL.createObjectURL(blob);
+    const opened = window.open(url, '_blank', 'noopener');
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      toast('浏览器拦截了截图窗口，请允许弹出窗口后重试。');
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (error) {
+    toast('读取截图失败：' + error.message);
+  }
+}
+
 async function loadProactiveSettings() {
   const form = $('#proactive-settings-form');
   if (!form) return;
@@ -3996,6 +4142,7 @@ async function previewTts() {
 async function loadModelPage() {
   await loadModelChip();
   await loadProactiveSettings().catch(() => {});
+  await loadAmbientSettings().catch(() => {});
   if (state.modelTab === 'tts') {
     await loadTtsData();
     const providerLayout = $('.provider-layout');
@@ -4362,6 +4509,7 @@ function bind() {
     updateTermControls({ scroll: true });
   });
   $('#log-scroll').addEventListener('scroll', () => {
+    if (state.termScrollLock) return;
     const scroll = $('#log-scroll');
     const near = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 48;
     if (!near && state.termFollow) { state.termFollow = false; updateTermControls(); }
@@ -4489,6 +4637,7 @@ function bind() {
   });
   $('#proactive-settings-form').addEventListener('submit', saveProactiveSettings);
   $('#proactive-test').addEventListener('click', testProactiveMessage);
+  $('#ambient-save').addEventListener('click', saveAmbientSettings);
   $('#memory-embedding-open').addEventListener('click', openEmbeddingSettings);
   $('#memory-tools-open').addEventListener('click', openMemoryDrawer);
   $('#memory-drawer-close').addEventListener('click', closeMemoryDrawer);

@@ -632,6 +632,30 @@
               <button class="btn primary" type="submit">保存设置</button>
             </div>
           </form>
+
+          <section class="card" id="ambient-settings-card">
+            <div class="card-head">
+              <div><h2>电脑环境感知</h2><p class="meta">只在你自己的私聊中生效。她会知道你当前的前台窗口和是否在电脑前；敏感窗口自动跳过，不会把截图或环境信息发到群聊。</p></div>
+              <span class="chip" id="ambient-state">读取中…</span>
+            </div>
+            <div class="switch-list">
+              <label class="setting-row"><span><strong>启用环境感知</strong><small>关闭后停止采样，也不向模型提供环境信息</small></span><input type="checkbox" class="switch" id="ambient-enabled"></label>
+              <label class="setting-row"><span><strong>允许截图</strong><small>只截当前前台窗口，截图保存在本机 data 目录</small></span><input type="checkbox" class="switch" id="ambient-screenshots"></label>
+              <label class="setting-row"><span><strong>让模型看到最近环境</strong><small>只拼进你的私聊系统提示，不进入群聊上下文</small></span><input type="checkbox" class="switch" id="ambient-share"></label>
+            </div>
+            <div class="tts-grid">
+              <label class="field"><span>采样间隔（秒）</span><input class="input" id="ambient-sample-seconds" type="number" min="10" max="600"></label>
+              <label class="field"><span>截图间隔（秒）</span><input class="input" id="ambient-screenshot-seconds" type="number" min="60" max="1800"></label>
+              <label class="field"><span>每小时截图上限</span><input class="input" id="ambient-max-screenshots" type="number" min="1" max="60"></label>
+              <label class="field"><span>保留时长（小时）</span><input class="input" id="ambient-retention-hours" type="number" min="1" max="168"></label>
+            </div>
+            <p class="meta" id="ambient-meta"></p>
+            <div id="ambient-recent" class="memory-jobs"></div>
+            <div class="form-actions">
+              <p class="meta" id="ambient-hint" role="status" aria-live="polite"></p>
+              <button class="btn primary" id="ambient-save" type="button">保存设置</button>
+            </div>
+          </section>
         </section>
 
         <!-- Agent 能力 -->
@@ -1081,6 +1105,6 @@
   </div>
 
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <script type="module" src="/client/app.js?v=20261027mic1"></script>
+  <script type="module" src="/client/app.js?v=20261027callfix1"></script>
 </body>
 </html>

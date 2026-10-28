@@ -8,6 +8,7 @@ import yaml
 from .types import DTO, ModelRef
 from ..agent.settings import AgentSettings
 from ..integrations.qq import QQSettings
+from ..ambient.settings import AmbientSettings
 
 SETTINGS_WRITE_LOCK = RLock()
 
@@ -113,6 +114,7 @@ class Settings(DTO):
     voice: VoiceSettings = Field(default_factory=VoiceSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
+    ambient: AmbientSettings = Field(default_factory=AmbientSettings)
     qq: QQSettings = Field(default_factory=QQSettings)
     database_url: SecretStr = SecretStr("postgresql+psycopg://agi@127.0.0.1:55432/agi_wind")
     access_token: SecretStr | None = None
@@ -221,6 +223,9 @@ def apply_persisted_settings(settings: Settings, data_dir: str | Path | None = N
     proactive = values.get("proactive", {})
     proactive.update(payload.get("proactive", {}))
     values["proactive"] = proactive
+    ambient = values.get("ambient", {})
+    ambient.update(payload.get("ambient", {}))
+    values["ambient"] = ambient
     values['qq'] = payload.get('qq', values.get('qq', {}))
     for field in MEMORY_SETTING_FIELDS:
         if field in payload.get("memory", {}):
@@ -251,6 +256,7 @@ def _persist_settings(settings: Settings, data_dir: str | Path | None = None) ->
         "voice": settings.voice.model_dump(mode="json"),
         "agent": settings.agent.model_dump(mode="json"),
         "proactive": settings.proactive.model_dump(mode="json"),
+        "ambient": settings.ambient.model_dump(mode="json"),
         "qq": settings.qq.model_dump(mode="json"),
     }
     temporary = path.with_suffix(".tmp")

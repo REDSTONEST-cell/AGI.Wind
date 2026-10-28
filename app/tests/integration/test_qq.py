@@ -20,7 +20,7 @@ async def test_qq_settings_auth_validation_masking_and_persistence(db,actor,seed
         assert response.json()['debounce_quiet_seconds']==2.4
         assert response.json()['reply_min_gap_seconds']==2.0
         assert payload['token'] not in response.text
-        assert payload['token'] not in (tmp_path/'settings.json').read_text()
+        assert payload['token'] not in (tmp_path/'settings.json').read_text(encoding='utf-8')
         from agi_wind.core.settings import Settings,apply_persisted_settings
         restored=apply_persisted_settings(Settings(data_dir=tmp_path))
         assert restored.qq.owner_qq=='3548782171'

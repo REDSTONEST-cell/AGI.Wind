@@ -21,6 +21,19 @@ async def test_client_key_is_a_bearer_credential_and_can_open_cookie_session(db,
         assert (await client.get("/api/v1/companions")).status_code == 200
 
 
+async def test_configured_public_origin_survives_tls_terminating_proxy(db, actor, seeded_scope, tmp_path):
+    settings = Settings(access_token="123456", data_dir=tmp_path, allowed_origins=["https://agi.example:18443"])
+    app = create_app(settings, db, actor)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            "/api/v1/client/key-session",
+            headers={"Origin": "https://agi.example:18443"},
+            json={"key": "123456"},
+        )
+        assert response.status_code == 200 and response.json()["csrf_token"]
+        assert "set-cookie" in response.headers
+
+
 async def test_client_key_session_rate_limits_repeated_failures(db, actor, seeded_scope, tmp_path):
     app = client_app(db, actor, tmp_path)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:

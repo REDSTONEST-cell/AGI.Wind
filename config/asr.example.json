@@ -1,0 +1,16 @@
+{
+  "model_dir": "C:/Models/ASR-Zipformer/sherpa-onnx-streaming-zipformer-zh-int8-2025-06-30",
+  "silence_seconds": 0.4,
+  "utterance_silence": 1.2,
+  "threads": 2,
+  "vad_model": "C:/Models/ASR-Zipformer/silero_vad.onnx",
+  "denoise": true,
+  "denoiser_model": "C:/Models/ASR-Zipformer/gtcrn_simple.onnx",
+  "offline": {
+    "kind": "sensevoice",
+    "model": "C:/Models/ASR-SenseVoice/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/model.int8.onnx",
+    "tokens": "C:/Models/ASR-SenseVoice/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/tokens.txt",
+    "threads": 2
+  },
+  "corrections": {}
+}
