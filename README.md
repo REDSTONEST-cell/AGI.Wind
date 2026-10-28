@@ -174,12 +174,11 @@ node scripts/test-log-view.mjs
 
 ## 文档
 
+- [功能与使用说明](docs/manuals/AGI.Wind-功能与使用说明.html)
 - [运维说明](docs/ops/runbook.md)
 - [环境说明](docs/ops/environment.md)
-- [实施进度](docs/ops/progress.md)
-- [验收记录](docs/ops/acceptance-report.md)
 - [实时通话](docs/ops/realtime-call.md)
-- [开发记录](docs/development/2026-10-25-development-record.md)
+- [第三方许可](docs/ops/licenses.md)
 
 ## 安全与隐私
 

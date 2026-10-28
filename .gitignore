@@ -27,3 +27,8 @@ coverage/
 # AOCI agent host integration (machine-bound; do not commit)
 .codex/config.toml
 .codex/config.toml.backup.*
+/.aoci/
+/aoci.txt
+/aoci.meta.txt
+/aoci.code.txt
+/AGENTS.md
