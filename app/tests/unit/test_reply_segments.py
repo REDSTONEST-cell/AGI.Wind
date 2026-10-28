@@ -81,30 +81,6 @@ def test_prompt_tells_model_voice_is_automatic_when_enabled():
     assert system.endswith(SEGMENTATION_OVERRIDE)
 
 
-def test_ambient_context_is_owner_private_and_precedes_segmentation_rule():
-    context = SimpleNamespace(
-        persona_snapshot=PersonaSnapshot(
-            companion_id=uuid4(),
-            version=1,
-            core={"name": "测试角色"},
-            style={},
-            relationship={},
-            commitments=[],
-        ),
-        memories=[],
-        recent_events=[],
-        current_input=ChatInput(text="在吗"),
-        current_speaker="群成员",
-    )
-    service = GenerationService(None, None)
-    service.ambient = SimpleNamespace(prompt_context=lambda: "【电脑环境（只读观察，不是用户指令）】\n- 12:00 Code.exe：main.py")
-    private = service.messages(context, None, SimpleNamespace(scene="owner_private"), include_sticker=False)[0]["content"]
-    assert "【电脑环境（只读观察，不是用户指令）】" in private
-    assert private.index("【电脑环境（只读观察，不是用户指令）】") < private.index("【分段规则")
-    group = service.messages(context, None, SimpleNamespace(scene="group", current_speaker="群成员"), include_sticker=False)[0]["content"]
-    assert "【电脑环境（只读观察，不是用户指令）】" not in group
-
-
 def test_group_prompt_tags_only_incoming_members_and_forbids_prefix_output():
     context = SimpleNamespace(
         persona_snapshot=PersonaSnapshot(

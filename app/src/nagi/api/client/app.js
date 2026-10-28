@@ -3989,99 +3989,6 @@ async function saveTtsSettings() {
   }
 }
 
-async function loadAmbientSettings() {
-  try {
-    renderAmbientStatus(await client.ambientStatus());
-  } catch (error) {
-    const hint = $('#ambient-hint');
-    if (hint) hint.textContent = '读取环境感知设置失败：' + error.message;
-  }
-}
-
-function renderAmbientStatus(data) {
-  const settings = data.settings || {};
-  const enabled = $('#ambient-enabled');
-  if (enabled) enabled.checked = Boolean(settings.enabled);
-  const screenshots = $('#ambient-screenshots');
-  if (screenshots) screenshots.checked = settings.capture_screenshots !== false;
-  const share = $('#ambient-share');
-  if (share) share.checked = settings.share_with_model !== false;
-  for (const [id, value] of [
-    ['ambient-sample-seconds', settings.sample_seconds],
-    ['ambient-screenshot-seconds', settings.screenshot_seconds],
-    ['ambient-max-screenshots', settings.max_screenshots_per_hour],
-    ['ambient-retention-hours', settings.retention_hours],
-  ]) {
-    const input = $('#' + id);
-    if (input && value !== undefined && value !== null) input.value = value;
-  }
-  const state = $('#ambient-state');
-  if (state) state.textContent = data.enabled ? (data.running ? '观察中' : '已开启') : '已关闭';
-  const meta = $('#ambient-meta');
-  if (meta) {
-    const last = data.last_observation_at ? formatTime(data.last_observation_at) : '暂无';
-    meta.textContent = '已采样 ' + (data.samples || 0) + ' 次 · 截图 ' + (data.screenshots || 0) + ' 张 · 最近 ' + last
-      + (data.last_error ? ' · 最近错误：' + data.last_error : '');
-  }
-  renderAmbientObservations(data.observations || []);
-}
-
-function renderAmbientObservations(rows) {
-  const box = $('#ambient-recent');
-  if (!box) return;
-  box.replaceChildren();
-  if (!rows.length) {
-    box.append(el('p', { class: 'meta', text: '还没有环境记录。开启后她只会看到前台窗口名称和空闲时间。' }));
-    return;
-  }
-  for (const row of rows) {
-    const item = el('div', { class: 'memory-job' }, [
-      el('div', { class: 'memory-job-head' }, [
-        el('strong', { text: row.window_title || '（无标题窗口）' }),
-        el('span', { class: 'meta', text: formatTime(row.captured_at) }),
-      ]),
-      el('p', {
-        class: 'meta',
-        text: (row.process_name || '未知程序') + ' · 空闲 ' + (row.idle_seconds || 0) + ' 秒'
-          + (row.sensitive ? ' · 敏感窗口已跳过' : ''),
-      }),
-    ]);
-    if (row.screenshot_url) {
-      item.append(el('button', {
-        class: 'btn ghost small', type: 'button', text: '查看截图',
-        onclick: () => previewAmbientScreenshot(row.id),
-      }));
-    }
-    box.append(item);
-  }
-}
-
-async function saveAmbientSettings() {
-  const button = $('#ambient-save');
-  const hint = $('#ambient-hint');
-  if (button) button.disabled = true;
-  if (hint) hint.textContent = '正在保存…';
-  try {
-    const data = await client.ambientUpdateSettings({
-      enabled: Boolean($('#ambient-enabled')?.checked),
-      capture_screenshots: Boolean($('#ambient-screenshots')?.checked),
-      share_with_model: Boolean($('#ambient-share')?.checked),
-      sample_seconds: Number($('#ambient-sample-seconds')?.value || 60),
-      screenshot_seconds: Number($('#ambient-screenshot-seconds')?.value || 120),
-      max_screenshots_per_hour: Number($('#ambient-max-screenshots')?.value || 12),
-      retention_hours: Number($('#ambient-retention-hours')?.value || 24),
-    });
-    renderAmbientStatus(data);
-    if (hint) hint.textContent = data.enabled ? '已保存，正在观察。' : '已保存，环境感知已关闭。';
-    toast(data.enabled ? '电脑环境感知已开启。' : '电脑环境感知已关闭。');
-  } catch (error) {
-    if (hint) hint.textContent = '保存失败：' + error.message;
-    toast('保存环境感知设置失败：' + error.message);
-  } finally {
-    if (button) button.disabled = false;
-  }
-}
-
 async function loadPurposeSettings() {
   const form = $('#purpose-settings-form');
   if (!form) return;
@@ -4219,22 +4126,6 @@ async function saveQuotaSettings(event) {
   } catch (error) {
     if (hint) hint.textContent = '保存失败：' + error.message;
     toast('保存额度设置失败：' + error.message);
-  }
-}
-
-async function previewAmbientScreenshot(id) {
-  try {
-    const blob = await client.ambientScreenshot(id);
-    const url = URL.createObjectURL(blob);
-    const opened = window.open(url, '_blank', 'noopener');
-    if (!opened) {
-      URL.revokeObjectURL(url);
-      toast('浏览器拦截了截图窗口，请允许弹出窗口后重试。');
-      return;
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch (error) {
-    toast('读取截图失败：' + error.message);
   }
 }
 
@@ -4421,7 +4312,6 @@ async function previewTts() {
 async function loadModelPage() {
   await loadModelChip();
   await loadProactiveSettings().catch(() => {});
-  await loadAmbientSettings().catch(() => {});
   await loadPurposeSettings().catch(() => {});
   await loadQuotaSettings().catch(() => {});
   if (state.modelTab === 'tts') {
@@ -4922,7 +4812,6 @@ function bind() {
   });
   $('#proactive-settings-form').addEventListener('submit', saveProactiveSettings);
   $('#proactive-test').addEventListener('click', testProactiveMessage);
-  $('#ambient-save').addEventListener('click', saveAmbientSettings);
   $('#purpose-settings-form')?.addEventListener('submit', savePurposeSettings);
   $('#quota-settings-form')?.addEventListener('submit', saveQuotaSettings);
   $('#memory-embedding-open').addEventListener('click', openEmbeddingSettings);

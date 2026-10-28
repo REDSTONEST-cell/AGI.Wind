@@ -375,35 +375,6 @@ export class AgiWindClient {
     return this.request('/api/v1/memory/card?companion_id=' + encodeURIComponent(companionId));
   }
 
-  ambientStatus() {
-    return this.request('/api/v1/ambient/status');
-  }
-
-  ambientUpdateSettings(body) {
-    return this.request('/api/v1/ambient/settings', { method: 'PATCH', body });
-  }
-
-  async ambientScreenshot(id) {
-    const headers = { Accept: 'image/jpeg', ...this.authHeaders() };
-    let response;
-    try {
-      response = await fetch(this.url('/api/v1/ambient/observations/' + encodeURIComponent(id) + '/screenshot'), {
-        headers,
-        credentials: this.bearer ? 'omit' : 'same-origin',
-        cache: 'no-store',
-      });
-    } catch (error) {
-      throw new ApiError('NETWORK', '无法连接服务：' + error.message, 0);
-    }
-    if (!response.ok) {
-      let payload = null;
-      try { payload = await response.json(); } catch {}
-      const detail = payload && payload.error ? payload.error : null;
-      throw new ApiError(detail ? detail.code : 'HTTP_' + response.status, detail ? detail.message : '读取截图失败', response.status);
-    }
-    return response.blob();
-  }
-
   generationSpeech(generationId) {
     return this.request('/api/v1/generations/' + encodeURIComponent(generationId) + '/speech');
   }

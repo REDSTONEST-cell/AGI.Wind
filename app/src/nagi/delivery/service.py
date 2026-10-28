@@ -122,7 +122,6 @@ class GenerationService:
         self.notify=None
         # Set by the gateway; None keeps tests and standalone service instances unchanged.
         self.idle_cognition=None
-        self.ambient=None
         self.memory_cards=None
         self.memory_card_budget=1200
 
@@ -612,14 +611,6 @@ class GenerationService:
                   + guide + "\n" + json.dumps(identity, ensure_ascii=False))
         if self.voice is not None and getattr(self.voice, "enabled", False):
             system += "\n" + VOICE_GUIDE
-        if self.ambient is not None and scope is not None and not group_scene:
-            try:
-                ambient_context = self.ambient.prompt_context()
-            except Exception:
-                logger.warning("ambient context failed",exc_info=True)
-                ambient_context = ""
-            if ambient_context:
-                system += "\n" + ambient_context
         if self.memory_cards is not None and scope is not None and not group_scene:
             try:
                 card = self.memory_cards.render(scope, budget_chars=self.memory_card_budget)
