@@ -679,6 +679,53 @@
               <button class="btn primary" id="ambient-save" type="button">保存设置</button>
             </div>
           </section>
+
+          <form class="card" id="purpose-settings-form">
+            <div class="card-head">
+              <div><h2>主动性与对话收尾</h2><p class="meta">她想找你的节奏、安静时段和每天上限；对话收尾记录只影响下一轮怎么接，不额外调用模型。</p></div>
+              <span class="chip" id="purpose-state">读取中…</span>
+            </div>
+            <div class="tts-grid">
+              <label class="setting-row span-2"><span><strong>启用主动目标</strong><small>由她决定是否联系你，仍受下面的时间和每日上限约束</small></span><input class="switch" id="purpose-enabled" type="checkbox"></label>
+              <label class="field"><span>承载通道</span><select class="select" id="purpose-carrier"><option value="qq">QQ</option><option value="web">网页</option></select></label>
+              <label class="field"><span>最短空闲（分钟）</span><input class="input" id="purpose-idle" type="number" min="1" max="1440"></label>
+              <label class="field"><span>两次主动最小间隔（分钟）</span><input class="input" id="purpose-gap" type="number" min="1" max="1440"></label>
+              <label class="field"><span>每天最多主动消息</span><input class="input" id="purpose-max" type="number" min="1" max="20"></label>
+              <div class="field-pair">
+                <label class="field"><span>安静开始</span><input class="input" id="purpose-quiet-start" type="time"></label>
+                <label class="field"><span>安静结束</span><input class="input" id="purpose-quiet-end" type="time"></label>
+              </div>
+              <label class="setting-row"><span><strong>记录对话收尾</strong><small>下次回来时知道上一段聊到哪里</small></span><input class="switch" id="purpose-closure-enabled" type="checkbox"></label>
+              <label class="field"><span>收尾保留（小时）</span><input class="input" id="purpose-closure-ttl" type="number" min="1" max="720"></label>
+            </div>
+            <p class="meta" id="purpose-meta"></p>
+            <div class="form-actions">
+              <p class="meta" id="purpose-hint" role="status" aria-live="polite"></p>
+              <button class="btn primary" type="submit">保存设置</button>
+            </div>
+          </form>
+
+          <form class="card" id="quota-settings-form">
+            <div class="card-head">
+              <div><h2>Token 额度</h2><p class="meta">按本地账本统计，达到每日上限后停止自动调用；0 表示不限制。</p></div>
+              <span class="chip" id="quota-state">读取中…</span>
+            </div>
+            <div class="tts-grid">
+              <label class="setting-row span-2"><span><strong>启用额度限制</strong><small>只限制自动模型调用，不影响你手动打开页面</small></span><input class="switch" id="quota-enabled" type="checkbox"></label>
+              <label class="field"><span>每日总 Token</span><input class="input" id="quota-total" type="number" min="0"></label>
+              <label class="field"><span>网页聊天 Token</span><input class="input" id="quota-web" type="number" min="0"></label>
+              <label class="field"><span>QQ 聊天 Token</span><input class="input" id="quota-qq" type="number" min="0"></label>
+              <label class="field"><span>记忆整理 Token</span><input class="input" id="quota-memory" type="number" min="0"></label>
+              <label class="field"><span>每日金额上限（元）</span><input class="input" id="quota-cost" type="number" min="0" step="0.01"></label>
+              <label class="field"><span>预警比例（%）</span><input class="input" id="quota-warning" type="number" min="0" max="100"></label>
+              <label class="setting-row span-2"><span><strong>达到上限后硬停止</strong><small>关闭时只预警，不阻止</small></span><input class="switch" id="quota-hard-stop" type="checkbox"></label>
+            </div>
+            <p class="meta" id="quota-meta"></p>
+            <div class="form-actions">
+              <p class="meta" id="quota-hint" role="status" aria-live="polite"></p>
+              <button class="btn primary" type="submit">保存设置</button>
+            </div>
+          </form>
         </section>
 
         <!-- Agent 能力 -->

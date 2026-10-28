@@ -4082,6 +4082,146 @@ async function saveAmbientSettings() {
   }
 }
 
+async function loadPurposeSettings() {
+  const form = $('#purpose-settings-form');
+  if (!form) return;
+  if (!state.companionId) { form.hidden = true; return; }
+  form.hidden = false;
+  try {
+    renderPurposeStatus(await client.purposeStatus(state.companionId, state.conversation?.id || null));
+  } catch (error) {
+    const hint = $('#purpose-hint');
+    if (hint) hint.textContent = '读取主动设置失败：' + error.message;
+  }
+}
+
+function renderPurposeStatus(data) {
+  const settings = data.settings || {};
+  for (const [id, value] of [
+    ['purpose-enabled', settings.enabled],
+    ['purpose-closure-enabled', settings.closure_enabled],
+  ]) {
+    const input = $('#' + id);
+    if (input) input.checked = Boolean(value);
+  }
+  const carrier = $('#purpose-carrier');
+  if (carrier) carrier.value = settings.carrier || 'qq';
+  for (const [id, value] of [
+    ['purpose-idle', settings.min_idle_minutes],
+    ['purpose-gap', settings.min_gap_minutes],
+    ['purpose-max', settings.max_per_day],
+    ['purpose-closure-ttl', settings.closure_ttl_hours],
+  ]) {
+    const input = $('#' + id);
+    if (input && value !== undefined && value !== null) input.value = value;
+  }
+  const start = $('#purpose-quiet-start');
+  if (start) start.value = settings.quiet_start || '';
+  const end = $('#purpose-quiet-end');
+  if (end) end.value = settings.quiet_end || '';
+  const stateChip = $('#purpose-state');
+  if (stateChip) {
+    const reasons = { disabled: '已关闭', quiet: '安静时段', cooldown: '冷却中', daily_limit: '今日已够', quota: '额度不足' };
+    stateChip.textContent = data.allowed ? '可主动' : (reasons[data.reason] || '等待中');
+  }
+  const meta = $('#purpose-meta');
+  if (meta) {
+    meta.textContent = '今天已主动 ' + (data.sent_today || 0) + ' 次'
+      + (data.last_delivery_at ? ' · 上次 ' + formatTime(data.last_delivery_at) : '')
+      + (data.has_closure ? ' · 有未接上的收尾' : '');
+  }
+}
+
+async function savePurposeSettings(event) {
+  event.preventDefault();
+  const hint = $('#purpose-hint');
+  if (hint) hint.textContent = '正在保存…';
+  try {
+    const data = await client.purposeUpdateSettings({
+      enabled: Boolean($('#purpose-enabled')?.checked),
+      carrier: $('#purpose-carrier')?.value || 'qq',
+      min_idle_minutes: Number($('#purpose-idle')?.value || 60),
+      min_gap_minutes: Number($('#purpose-gap')?.value || 180),
+      max_per_day: Number($('#purpose-max')?.value || 3),
+      quiet_start: $('#purpose-quiet-start')?.value || '',
+      quiet_end: $('#purpose-quiet-end')?.value || '',
+      closure_enabled: Boolean($('#purpose-closure-enabled')?.checked),
+      closure_ttl_hours: Number($('#purpose-closure-ttl')?.value || 72),
+    });
+    const purpose = { settings: data.settings, allowed: false, reason: data.settings?.enabled ? '' : 'disabled' };
+    renderPurposeStatus(purpose);
+    if (hint) hint.textContent = '已保存。';
+    toast('主动设置已保存。');
+  } catch (error) {
+    if (hint) hint.textContent = '保存失败：' + error.message;
+    toast('保存主动设置失败：' + error.message);
+  }
+}
+
+async function loadQuotaSettings() {
+  const form = $('#quota-settings-form');
+  if (!form) return;
+  try {
+    renderQuotaStatus(await client.usageQuota());
+  } catch (error) {
+    const hint = $('#quota-hint');
+    if (hint) hint.textContent = '读取额度失败：' + error.message;
+  }
+}
+
+function renderQuotaStatus(data) {
+  const settings = data.settings || {};
+  for (const [id, value] of [
+    ['quota-enabled', settings.enabled],
+    ['quota-hard-stop', settings.hard_stop],
+  ]) {
+    const input = $('#' + id);
+    if (input) input.checked = Boolean(value);
+  }
+  for (const [id, value] of [
+    ['quota-total', settings.daily_total_tokens],
+    ['quota-web', settings.daily_web_tokens],
+    ['quota-qq', settings.daily_qq_tokens],
+    ['quota-memory', settings.daily_memory_tokens],
+    ['quota-cost', settings.daily_cost_cny],
+    ['quota-warning', settings.warning_percent],
+  ]) {
+    const input = $('#' + id);
+    if (input && value !== undefined && value !== null) input.value = value;
+  }
+  const stateChip = $('#quota-state');
+  if (stateChip) stateChip.textContent = settings.enabled ? '限制中' : '未限制';
+  const meta = $('#quota-meta');
+  if (meta) {
+    meta.textContent = '今日已用 ' + (data.total_tokens || 0).toLocaleString('zh-CN') + ' Token'
+      + ' · ¥' + Number(data.cost_cny || 0).toFixed(2);
+  }
+}
+
+async function saveQuotaSettings(event) {
+  event.preventDefault();
+  const hint = $('#quota-hint');
+  if (hint) hint.textContent = '正在保存…';
+  try {
+    const data = await client.usageUpdateSettings({
+      enabled: Boolean($('#quota-enabled')?.checked),
+      daily_total_tokens: Number($('#quota-total')?.value || 0),
+      daily_web_tokens: Number($('#quota-web')?.value || 0),
+      daily_qq_tokens: Number($('#quota-qq')?.value || 0),
+      daily_memory_tokens: Number($('#quota-memory')?.value || 0),
+      daily_cost_cny: Number($('#quota-cost')?.value || 0),
+      warning_percent: Number($('#quota-warning')?.value || 80),
+      hard_stop: Boolean($('#quota-hard-stop')?.checked),
+    });
+    renderQuotaStatus({ settings: data.settings, total_tokens: 0, cost_cny: 0 });
+    if (hint) hint.textContent = '已保存。';
+    toast('额度设置已保存。');
+  } catch (error) {
+    if (hint) hint.textContent = '保存失败：' + error.message;
+    toast('保存额度设置失败：' + error.message);
+  }
+}
+
 async function previewAmbientScreenshot(id) {
   try {
     const blob = await client.ambientScreenshot(id);
@@ -4282,6 +4422,8 @@ async function loadModelPage() {
   await loadModelChip();
   await loadProactiveSettings().catch(() => {});
   await loadAmbientSettings().catch(() => {});
+  await loadPurposeSettings().catch(() => {});
+  await loadQuotaSettings().catch(() => {});
   if (state.modelTab === 'tts') {
     await loadTtsData();
     const providerLayout = $('.provider-layout');
@@ -4781,6 +4923,8 @@ function bind() {
   $('#proactive-settings-form').addEventListener('submit', saveProactiveSettings);
   $('#proactive-test').addEventListener('click', testProactiveMessage);
   $('#ambient-save').addEventListener('click', saveAmbientSettings);
+  $('#purpose-settings-form')?.addEventListener('submit', savePurposeSettings);
+  $('#quota-settings-form')?.addEventListener('submit', saveQuotaSettings);
   $('#memory-embedding-open').addEventListener('click', openEmbeddingSettings);
   $('#memory-tools-open').addEventListener('click', openMemoryDrawer);
   $('#memory-drawer-close').addEventListener('click', closeMemoryDrawer);

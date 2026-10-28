@@ -353,6 +353,28 @@ export class AgiWindClient {
     return this.request('/api/v1/voices');
   }
 
+  purposeStatus(companionId, conversationId = null) {
+    const params = new URLSearchParams({ companion_id: companionId });
+    if (conversationId) params.set('conversation_id', conversationId);
+    return this.request('/api/v1/purpose/status?' + params.toString());
+  }
+
+  purposeUpdateSettings(body) {
+    return this.request('/api/v1/purpose/settings', { method: 'PATCH', body });
+  }
+
+  usageQuota() {
+    return this.request('/api/v1/usage/quota');
+  }
+
+  usageUpdateSettings(body) {
+    return this.request('/api/v1/usage/settings', { method: 'PATCH', body });
+  }
+
+  memoryCard(companionId) {
+    return this.request('/api/v1/memory/card?companion_id=' + encodeURIComponent(companionId));
+  }
+
   ambientStatus() {
     return this.request('/api/v1/ambient/status');
   }
