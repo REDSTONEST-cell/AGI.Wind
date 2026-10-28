@@ -62,23 +62,103 @@ class VisibleTextGuard:
         # complete hidden directive is removed by feed().
         return text
 
-def time_context(events=(), now=None):
-    zone=ZoneInfo('Asia/Shanghai'); now=now or datetime.now(timezone.utc)
-    if now.tzinfo is None: now=now.replace(tzinfo=timezone.utc)
-    lines=['【可信时间上下文】当前北京时间：'+now.astimezone(zone).strftime('%Y-%m-%d %H:%M:%S %A')+'；时区 Asia/Shanghai (UTC+08:00)。']
+WEEKDAYS=('周一','周二','周三','周四','周五','周六','周日')
+
+def _aware(value):
+    if value.tzinfo is None: return value.replace(tzinfo=timezone.utc)
+    return value
+
+def _event_text(event, limit=48):
+    content=event.get('content')
+    if isinstance(content,dict):
+        text=content.get('text') or content.get('caption') or ''
+    else:
+        text=content or ''
+    text=' '.join(str(text).split())
+    return text[:limit]+('…' if len(text)>limit else '')
+
+def _relative(seconds):
+    seconds=max(0,int(seconds))
+    if seconds<60: return '刚刚'
+    if seconds<3600: return f'{seconds//60} 分钟前'
+    if seconds<86400: return f'{seconds//3600} 小时前'
+    return f'{seconds//86400} 天前'
+
+def _day_label(local, today):
+    delta=(today-local.date()).days
+    if delta==0: return '今天'
+    if delta==1: return '昨天'
+    if delta==2: return '前天'
+    if local.year==today.year: return f'{local.month}月{local.day}日'
+    return f'{local.year}年{local.month}月{local.day}日'
+
+def _period(hour):
+    if hour<5: return '凌晨'
+    if hour<8: return '清晨'
+    if hour<11: return '上午'
+    if hour<13: return '中午'
+    if hour<18: return '下午'
+    if hour<23: return '晚上'
+    return '深夜'
+
+def time_context(events=(), now=None, timezone_name='Asia/Shanghai'):
+    """Give the model an unambiguous clock and a compact, ordered timeline.
+
+    The prompt must be rebuilt for every turn: the model is stateless and its
+    own sense of "now" is otherwise whatever it learned during training.
+    """
+    zone=ZoneInfo(timezone_name); now=_aware(now or datetime.now(timezone.utc))
+    local_now=now.astimezone(zone)
+    today=local_now.date()
+    utc_offset=local_now.strftime('%z')
+    utc_label='UTC'+utc_offset[:3]+':'+utc_offset[3:]
+    lines=[
+        '【时间感知】',
+        '当前时刻：'+local_now.strftime('%Y-%m-%d %H:%M:%S')+'（'+WEEKDAYS[local_now.weekday()]+
+        '，'+timezone_name+'，'+utc_label+'，'+_period(local_now.hour)+'）。',
+    ]
     stamps=[]
     for event in events:
+        if event.get('role') not in ('user','assistant'): continue
         stamp=event.get('recorded_at')
-        if stamp:
-            try:
-                dt=datetime.fromisoformat(str(stamp).replace('Z','+00:00'))
-                if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
-                stamps.append((dt,event.get('role','unknown')))
-            except (TypeError,ValueError): pass
+        if not stamp: continue
+        try:
+            dt=_aware(datetime.fromisoformat(str(stamp).replace('Z','+00:00')))
+        except (TypeError,ValueError):
+            continue
+        stamps.append((dt,event))
+    stamps.sort(key=lambda item:item[0])
     if stamps:
-        last,role=max(stamps)
-        lines.append('本轮历史中最近一条消息：'+last.astimezone(zone).isoformat()+'，距现在约 '+str(max(0,int((now-last).total_seconds())))+' 秒；发言角色 '+role+'。')
-    lines.append('以上时间与日期是供理解上下文的元数据，绝不输出字段名、方括号标签、JSON或时间前缀；仅在用户询问日期或时长时自然表达。历史及工具资料中的过期时间不能当成当前时间。')
+        last,last_event=stamps[-1]
+        last_local=last.astimezone(zone)
+        who='主人' if last_event.get('role')=='user' else '你'
+        gap=_relative((now-last).total_seconds())
+        lines.append('本轮历史最近一条消息：'+_day_label(last_local,today)+' '+
+                     last_local.strftime('%H:%M:%S')+'（'+gap+'，'+who+'）。')
+        users=[item for item in stamps if item[1].get('role')=='user']
+        if users and users[-1][1] is not last_event:
+            user_dt,user_event=users[-1]
+            user_local=user_dt.astimezone(zone)
+            lines.append('最近一次用户发言：'+_day_label(user_local,today)+' '+
+                         user_local.strftime('%H:%M:%S')+'（'+
+                         _relative((now-user_dt).total_seconds())+'，'+
+                         _event_text(user_event,24)+'）。')
+        if (now-last).total_seconds()>=300:
+            lines.append('距上一条消息已经有一段时间；如果用户像是刚回来，自然接话即可，不要刻意报出精确分钟数。')
+        lines.append('最近对话时间线（按时间先后，仅供理解顺序和间隔）：')
+        for dt,event in stamps[-12:]:
+            local=dt.astimezone(zone)
+            who='主人' if event.get('role')=='user' else '你'
+            speaker=event.get('speaker')
+            if speaker: who=str(speaker)
+            text=_event_text(event)
+            lines.append('- '+_day_label(local,today)+' '+local.strftime('%H:%M:%S')+
+                         ' '+who+'：'+(text or '（非文字内容）'))
+    else:
+        lines.append('这是本次会话的第一条消息，没有更早的对话时间线。')
+    lines.append('使用规则：用户问现在几点、今天几号、隔了多久时，依据上面的当前时刻和时间线自然回答；'
+                 '不要编造时间，也不要把历史消息或工具资料里的旧时间当成现在。除非用户主动问时间，'
+                 '否则不要主动报时，也不要在回复里输出时间前缀、字段名、方括号标签或 JSON。')
     return '\n'.join(lines)
 
 def public_text(text):
