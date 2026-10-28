@@ -52,6 +52,12 @@ _BARE_EMOTION = re.compile(
 _DIRECTIVE_PREFIXES = ("[心情", "【心情", "[情绪", "[表情包", "【情绪", "【表情包") + tuple(
     "[" + name for name in (*EMOTIONS, *ALIASES)
 ) + tuple("【" + name for name in (*EMOTIONS, *ALIASES))
+_BARE_EMOTION_NAMES = "|".join(re.escape(value) for value in (*EMOTIONS, *ALIASES))
+# Some models forget the brackets and write the emotion as a bare first line.
+# Hold a possible bare label until the newline arrives, then consume it only if
+# the whole first line is exactly that label.
+_BARE_LINE = re.compile(r"^\s*(" + _BARE_EMOTION_NAMES + r")\s*[。.!！?？]?\s*(?:\r?\n)")
+_BARE_WORD_ONLY = re.compile(r"^\s*(" + _BARE_EMOTION_NAMES + r")\s*[。.!！?？]?\s*$")
 
 
 class EmotionTagStream:
@@ -85,6 +91,12 @@ class EmotionTagStream:
                     self.emotion = normalize_emotion(self.raw_tag)
                     self.buffer = self.buffer[bare.end():]
                     continue
+                line = _BARE_LINE.match(self.buffer)
+                if line:
+                    self.raw_tag = line.group(1).strip("。.!！?？ ")
+                    self.emotion = normalize_emotion(self.raw_tag)
+                    self.buffer = self.buffer[line.end():]
+                    continue
                 return
             name, value = match.group(1), (match.group(2) or "").strip()
             if name in ("情绪", "心情"):
@@ -117,6 +129,8 @@ class EmotionTagStream:
         self._consume_directives()
         stripped = self.buffer.lstrip()
         if not stripped:
+            return ""
+        if _BARE_WORD_ONLY.match(self.buffer):
             return ""
         if stripped[0] in "[【":
             # Wait while this can still become a directive; otherwise it is normal text.

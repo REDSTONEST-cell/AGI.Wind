@@ -93,3 +93,24 @@ def test_bare_alias_emotion_tag_and_fullwidth_brackets():
     assert stream.feed("【高兴】\n好呀。") == "好呀。"
     assert stream.emotion == "开心"
 
+
+def test_bare_emotion_line_without_brackets_is_stripped():
+    stream = EmotionTagStream()
+    assert stream.feed("开心") == ""
+    visible = stream.feed("\n在呢")
+    assert visible == "在呢"
+    assert stream.emotion == "开心"
+    assert stream.feed("怎么了？") == "怎么了？"
+
+
+def test_bare_emotion_line_is_stripped_in_one_chunk():
+    stream = EmotionTagStream()
+    assert stream.feed("平静\n今天没什么事。") == "今天没什么事。"
+    assert stream.emotion == "平静"
+
+
+def test_plain_emotion_prefix_is_not_swallowed_without_newline():
+    stream = EmotionTagStream()
+    assert stream.feed("开心呀，我在呢。") == "开心呀，我在呢。"
+    assert stream.emotion is None
+
